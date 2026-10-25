@@ -1,0 +1,50 @@
+@model IReadOnlyList<Pipeline>
+@{
+    ViewData["Title"] = "Pipelines";
+}
+
+<div class="page-header">
+    <h1>Pipelines</h1>
+    <a class="btn btn-primary" asp-action="Create">New pipeline</a>
+</div>
+
+@if (Model.Count == 0)
+{
+    <div class="card empty">
+        <p>No pipelines yet. A pipeline is a chain of Claude agents: each one gets the input plus the replies of the agents before it.</p>
+        <a class="btn btn-primary" asp-action="Create">Create your first pipeline</a>
+    </div>
+}
+
+<div class="grid">
+    @foreach (var pipeline in Model)
+    {
+        <article class="card pipeline-card">
+            <h2><a asp-action="Edit" asp-route-id="@pipeline.Id">@pipeline.Name</a></h2>
+            @if (!string.IsNullOrWhiteSpace(pipeline.Description))
+            {
+                <p class="muted">@pipeline.Description</p>
+            }
+            <ol class="chain">
+                @foreach (var agent in pipeline.Agents)
+                {
+                    <li>
+                        @agent.Name
+                        @if (agent.Files.Count > 0)
+                        {
+                            <span class="badge" title="Attached files">@agent.Files.Count file@(agent.Files.Count == 1 ? "" : "s")</span>
+                        }
+                    </li>
+                }
+                @if (pipeline.Agents.Count == 0)
+                {
+                    <li class="muted">No agents yet</li>
+                }
+            </ol>
+            <div class="card-actions">
+                <a class="btn btn-primary" asp-action="Run" asp-route-id="@pipeline.Id">Run</a>
+                <a class="btn btn-secondary" asp-action="Edit" asp-route-id="@pipeline.Id">Edit</a>
+            </div>
+        </article>
+    }
+</div>

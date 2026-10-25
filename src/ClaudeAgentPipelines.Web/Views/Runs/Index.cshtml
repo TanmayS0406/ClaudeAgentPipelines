@@ -1,0 +1,50 @@
+@model IReadOnlyList<PipelineRun>
+@{
+    ViewData["Title"] = "Runs";
+}
+
+<h1>Runs</h1>
+
+@if (Model.Count == 0)
+{
+    <div class="card empty">
+        <p>No runs yet. Open a pipeline and click <strong>Run</strong>.</p>
+        <a class="btn btn-primary" asp-controller="Pipelines" asp-action="Index">Pipelines</a>
+    </div>
+}
+else
+{
+    <table class="table card">
+        <thead>
+            <tr>
+                <th>Pipeline</th>
+                <th>Input</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var run in Model)
+            {
+                var duration = (run.CompletedAt ?? DateTimeOffset.UtcNow) - run.StartedAt;
+                <tr>
+                    <td><a asp-action="Details" asp-route-id="@run.Id">@run.PipelineName</a></td>
+                    <td class="truncate" title="@run.Input">@run.Input</td>
+                    <td>@run.StartedAt.ToLocalTime().ToString("g")</td>
+                    <td>@(duration.TotalMinutes >= 1 ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s" : $"{duration.Seconds}s")</td>
+                    <td><span class="status status-@run.Status.ToString().ToLowerInvariant()">@run.Status</span></td>
+                    <td>
+                        @if (run.IsFinished)
+                        {
+                            <form asp-action="Delete" asp-route-id="@run.Id" method="post" data-confirm="Delete this run?">
+                                <button type="submit" class="btn btn-link btn-danger">Delete</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

@@ -1,0 +1,56 @@
+@model RunPipelineViewModel
+@{
+    var pipeline = Model.Pipeline;
+    ViewData["Title"] = "Run " + pipeline.Name;
+}
+
+<div class="page-header">
+    <h1>Run: @pipeline.Name</h1>
+    <a class="btn btn-secondary" asp-action="Edit" asp-route-id="@pipeline.Id">Edit pipeline</a>
+</div>
+
+<div class="run-layout">
+    <form class="card form" asp-action="Run" asp-route-id="@pipeline.Id" method="post">
+        <div asp-validation-summary="All" class="alert alert-error"></div>
+        <label for="Input">Pipeline input</label>
+        <textarea id="Input" name="Input" rows="8" required maxlength="50000" autofocus
+                  placeholder="What should the pipeline work on?">@Model.Form.Input</textarea>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large" disabled="@(pipeline.Agents.Count == 0)">Run pipeline</button>
+        </div>
+    </form>
+
+    <aside class="card">
+        <h2>Agents</h2>
+        <ol class="chain">
+            @foreach (var agent in pipeline.Agents)
+            {
+                <li>
+                    <strong>@agent.Name</strong>
+                    @if (!string.IsNullOrWhiteSpace(agent.Model))
+                    {
+                        <span class="badge">@agent.Model</span>
+                    }
+                    @if (agent.Files.Count > 0)
+                    {
+                        <div class="muted small">Files: @string.Join(", ", agent.Files.Select(f => f.FileName))</div>
+                    }
+                </li>
+            }
+        </ol>
+
+        @if (Model.RecentRuns.Count > 0)
+        {
+            <h2>Recent runs</h2>
+            <ul class="plain-list">
+                @foreach (var run in Model.RecentRuns)
+                {
+                    <li>
+                        <a asp-controller="Runs" asp-action="Details" asp-route-id="@run.Id">@run.StartedAt.ToLocalTime().ToString("g")</a>
+                        <span class="status status-@run.Status.ToString().ToLowerInvariant()">@run.Status</span>
+                    </li>
+                }
+            </ul>
+        }
+    </aside>
+</div>

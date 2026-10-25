@@ -1,0 +1,21 @@
+@model PipelineForm
+@{
+    ViewData["Title"] = "New pipeline";
+}
+
+<h1>New pipeline</h1>
+
+<form class="card form" asp-action="Create" method="post">
+    <div asp-validation-summary="ModelOnly" class="alert alert-error"></div>
+    <label asp-for="Name">Name</label>
+    <input asp-for="Name" placeholder="For example: Blog post writer" autofocus />
+    <span asp-validation-for="Name" class="field-error"></span>
+
+    <label asp-for="Description">Description <span class="muted">(optional)</span></label>
+    <textarea asp-for="Description" rows="2"></textarea>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create and add agents</button>
+        <a class="btn btn-secondary" asp-action="Index">Cancel</a>
+    </div>
+</form>

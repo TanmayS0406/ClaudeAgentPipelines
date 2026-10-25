@@ -1,0 +1,140 @@
+@model PipelineEditViewModel
+@{
+    var pipeline = Model.Pipeline;
+    ViewData["Title"] = "Edit " + pipeline.Name;
+    var accept = string.Join(",", Model.Storage.EffectiveExtensions);
+    var defaultModelLabel = string.IsNullOrWhiteSpace(Model.DefaultModel) ? "Claude Code default" : Model.DefaultModel;
+}
+
+<datalist id="model-options">
+    @foreach (var option in Model.ModelOptions)
+    {
+        <option value="@option"></option>
+    }
+</datalist>
+
+<div class="page-header">
+    <h1>@pipeline.Name</h1>
+    <div class="actions">
+        <a class="btn btn-primary" asp-action="Run" asp-route-id="@pipeline.Id">Run pipeline</a>
+        <a class="btn btn-secondary" asp-action="Index">All pipelines</a>
+    </div>
+</div>
+
+<form class="card form" asp-action="Update" asp-route-id="@pipeline.Id" method="post">
+    <h2>Pipeline</h2>
+    <label for="pipeline-name">Name</label>
+    <input id="pipeline-name" name="Name" value="@pipeline.Name" required maxlength="100" />
+    <label for="pipeline-description">Description</label>
+    <textarea id="pipeline-description" name="Description" rows="2" maxlength="1000">@pipeline.Description</textarea>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-secondary">Save</button>
+    </div>
+</form>
+
+<h2 class="section-title">Agents <span class="muted">- run top to bottom; each sees the input and every earlier reply</span></h2>
+
+@for (var i = 0; i < pipeline.Agents.Count; i++)
+{
+    var agent = pipeline.Agents[i];
+    <section class="card agent" id="agent-@agent.Id">
+        <div class="agent-header">
+            <span class="step">@(i + 1)</span>
+            <h3>@agent.Name</h3>
+            <div class="actions">
+                <form asp-action="MoveAgent" asp-route-id="@pipeline.Id" method="post">
+                    <input type="hidden" name="agentId" value="@agent.Id" />
+                    <input type="hidden" name="offset" value="-1" />
+                    <button type="submit" class="btn btn-icon" title="Move up" disabled="@(i == 0)">&uarr;</button>
+                </form>
+                <form asp-action="MoveAgent" asp-route-id="@pipeline.Id" method="post">
+                    <input type="hidden" name="agentId" value="@agent.Id" />
+                    <input type="hidden" name="offset" value="1" />
+                    <button type="submit" class="btn btn-icon" title="Move down" disabled="@(i == pipeline.Agents.Count - 1)">&darr;</button>
+                </form>
+                <form asp-action="DeleteAgent" asp-route-id="@pipeline.Id" method="post"
+                      data-confirm="Remove agent &quot;@agent.Name&quot; and its files?">
+                    <input type="hidden" name="agentId" value="@agent.Id" />
+                    <button type="submit" class="btn btn-icon btn-danger" title="Remove agent">&times;</button>
+                </form>
+            </div>
+        </div>
+
+        <form class="form" asp-action="UpdateAgent" asp-route-id="@pipeline.Id" method="post">
+            <input type="hidden" name="agentId" value="@agent.Id" />
+            <div class="row">
+                <div>
+                    <label for="name-@agent.Id">Name</label>
+                    <input id="name-@agent.Id" name="Name" value="@agent.Name" required maxlength="80" />
+                </div>
+                <div>
+                    <label for="model-@agent.Id">Model</label>
+                    <input id="model-@agent.Id" name="Model" value="@agent.Model" list="model-options" maxlength="100"
+                           placeholder="@defaultModelLabel" />
+                </div>
+            </div>
+            <label for="instructions-@agent.Id">Prompt</label>
+            <textarea id="instructions-@agent.Id" name="Instructions" rows="5" required maxlength="20000">@agent.Instructions</textarea>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-secondary">Save agent</button>
+            </div>
+        </form>
+
+        <div class="files">
+            <h4>Attached files <span class="muted">- only this agent can read them</span></h4>
+            @if (agent.Files.Count == 0)
+            {
+                <p class="muted">No files attached.</p>
+            }
+            else
+            {
+                <ul class="file-list">
+                    @foreach (var file in agent.Files)
+                    {
+                        <li>
+                            <a asp-action="DownloadFile" asp-route-id="@pipeline.Id" asp-route-agentId="@agent.Id" asp-route-fileId="@file.Id">@file.FileName</a>
+                            <span class="muted">@(file.Length < 1024 ? file.Length + " B" : (file.Length / 1024.0).ToString("0.#") + " KB")</span>
+                            <form asp-action="DeleteFile" asp-route-id="@pipeline.Id" method="post">
+                                <input type="hidden" name="agentId" value="@agent.Id" />
+                                <input type="hidden" name="fileId" value="@file.Id" />
+                                <button type="submit" class="btn btn-link btn-danger">Remove</button>
+                            </form>
+                        </li>
+                    }
+                </ul>
+            }
+            <form class="upload" asp-action="UploadFiles" asp-route-id="@pipeline.Id" method="post" enctype="multipart/form-data">
+                <input type="hidden" name="agentId" value="@agent.Id" />
+                <input type="file" name="files" multiple accept="@accept" />
+                <button type="submit" class="btn btn-secondary">Attach</button>
+            </form>
+        </div>
+    </section>
+}
+
+<section class="card agent agent-new">
+    <h3>Add an agent</h3>
+    <form class="form" asp-action="AddAgent" asp-route-id="@pipeline.Id" method="post">
+        <div class="row">
+            <div>
+                <label for="new-name">Name</label>
+                <input id="new-name" name="Name" required maxlength="80" placeholder="For example: Researcher" />
+            </div>
+            <div>
+                <label for="new-model">Model</label>
+                <input id="new-model" name="Model" list="model-options" maxlength="100" placeholder="@defaultModelLabel" />
+            </div>
+        </div>
+        <label for="new-instructions">Prompt</label>
+        <textarea id="new-instructions" name="Instructions" rows="4" required maxlength="20000"
+                  placeholder="What this agent does with its input. You can attach reference files after adding it."></textarea>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Add agent</button>
+        </div>
+    </form>
+</section>
+
+<form class="danger-zone" asp-action="Delete" asp-route-id="@pipeline.Id" method="post"
+      data-confirm="Delete this pipeline, its agents and their files?">
+    <button type="submit" class="btn btn-link btn-danger">Delete pipeline</button>
+</form>

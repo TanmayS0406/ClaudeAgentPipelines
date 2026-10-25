@@ -1,0 +1,58 @@
+@model LoginViewModel
+@{
+    ViewData["Title"] = "Sign in";
+    var status = Model.Status;
+}
+
+<section class="card login-card">
+    <h1>Sign in with Claude</h1>
+    <p class="muted">
+        Pipelines run on your own Claude account through Claude Code on this computer.
+        The app never sees your password or tokens - Claude Code signs in through your browser and keeps them.
+    </p>
+
+    @if (!status.CliFound)
+    {
+        <div class="alert alert-error">
+            Claude Code is not installed on this computer (or not on PATH).
+            Install it from <a href="https://claude.com/claude-code" target="_blank" rel="noopener">claude.com/claude-code</a>,
+            or set <code>Claude:CliPath</code> in <code>appsettings.json</code>, then reload this page.
+        </div>
+    }
+    else
+    {
+        <form id="continue-form" asp-action="Continue" method="post">
+            <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
+            @if (status.LoggedIn)
+            {
+                <p>
+                    Claude Code on this computer is signed in as <strong>@status.Account</strong>
+                    @if (status.SubscriptionType is not null)
+                    {
+                        <span class="badge">@status.SubscriptionType</span>
+                    }
+                </p>
+                <button type="submit" class="btn btn-primary btn-large">Continue as @status.Account</button>
+            }
+        </form>
+
+        <div class="login-actions">
+            <button type="button" id="start-login" class="btn @(status.LoggedIn ? "btn-secondary" : "btn-primary btn-large")"
+                    data-start-url="@Url.Action("StartLogin")" data-status-url="@Url.Action("Status")">
+                @(status.LoggedIn ? "Use a different Claude account" : "Sign in with Claude")
+            </button>
+        </div>
+
+        <p id="login-progress" class="login-progress" @(Model.LoginInProgress ? "" : "hidden")>
+            <span class="spinner"></span>
+            <span id="login-progress-text">
+                A Claude Code window opened on this computer. Finish signing in in your browser - this page continues automatically.
+            </span>
+        </p>
+        <p id="login-error" class="alert alert-error" hidden></p>
+    }
+</section>
+
+@section Scripts {
+    <script src="~/js/login.js" asp-append-version="true"></script>
+}
