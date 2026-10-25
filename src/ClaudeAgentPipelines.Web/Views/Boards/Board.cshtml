@@ -1,0 +1,85 @@
+@model BoardViewModel
+@{
+    var project = Model.Project;
+    ViewData["Title"] = project.Name + " board";
+    ViewData["Wide"] = true;
+    var columns = new (FeatureStage Stage, string Description, AgentRole[] Roles)[]
+    {
+        (FeatureStage.New, "Feature prompts waiting for the team. Drag a card to Planning to start it.", []),
+        (FeatureStage.Planning, "The Planner writes the technical plan: schema, API contract, UI and test plan.", [AgentRole.Planner]),
+        (FeatureStage.Development, "Database, Backend and Frontend agents build it in parallel.", [AgentRole.Database, AgentRole.Backend, AgentRole.Frontend]),
+        (FeatureStage.Testing, "The Tester runs the tests; developers fix what fails.", [AgentRole.Testing]),
+        (FeatureStage.Deploying, project.Azure.DeployEnabled ? "DevOps updates the Azure infrastructure and deploys." : "DevOps updates the Azure infrastructure and pipeline (deployment is off).", [AgentRole.DevOps]),
+        (FeatureStage.Done, "Built, tested and committed.", [])
+    };
+}
+
+<div class="board-header">
+    <div class="breadcrumb">
+        <a asp-action="Index">Boards</a> <span>/</span> <strong>@project.Name</strong>
+    </div>
+    <nav class="pivots">
+        <a class="pivot active" asp-action="Board" asp-route-id="@project.Id">Board</a>
+        <a class="pivot" asp-action="Settings" asp-route-id="@project.Id">Settings &amp; team</a>
+    </nav>
+</div>
+
+<div class="board-toolbar">
+    <button type="button" class="btn btn-azure" id="new-item">&#xFF0B; New item</button>
+    <input type="search" id="board-filter" class="board-filter" placeholder="Filter by ID or keyword" aria-label="Filter cards" />
+    <span class="muted small board-azure" title="@(project.Azure.DeployEnabled ? "The DevOps agent deploys to Azure" : "The DevOps agent writes Bicep and the pipeline only")">
+        Azure: @(project.Azure.DeployEnabled ? $"deploys to {project.Azure.ResourceGroup}" : "deployment off")
+    </span>
+</div>
+
+<div id="board" class="kanban"
+     data-events-url="@Url.Action("Events", new { id = project.Id, version = Model.Version })"
+     data-feature-url="@Url.Action("Details", "Features", new { projectId = project.Id, id = "__id__" })"
+     data-start-url="@Url.Action("Start", "Features", new { projectId = project.Id, id = "__id__" })">
+    @foreach (var column in columns)
+    {
+        <section class="kanban-column" data-stage="@column.Stage">
+            <header class="column-header" title="@column.Description">
+                <span class="column-title">@column.Stage</span>
+                <span class="column-count" data-role="count">0</span>
+                <span class="column-agents">
+                    @foreach (var role in column.Roles)
+                    {
+                        <span class="avatar avatar-@role.ToString().ToLowerInvariant()" title="@project.Agent(role).Name">@Team.Initials(role)</span>
+                    }
+                </span>
+            </header>
+            @if (column.Stage == FeatureStage.New)
+            {
+                <button type="button" class="column-add" data-role="add">&#xFF0B; New item</button>
+            }
+            <div class="column-cards" data-role="cards"></div>
+        </section>
+    }
+</div>
+
+<script type="application/json" id="board-data">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Cards, PipelineStore.Json).Replace("<", "\\u003c"))</script>
+<form id="board-token">@Html.AntiForgeryToken()</form>
+
+<dialog id="new-feature" class="dialog">
+    <form class="form" asp-controller="Features" asp-action="Create" asp-route-projectId="@project.Id" method="post">
+        <div class="dialog-header">
+            <span class="wi-icon"></span>
+            <h2>New feature</h2>
+        </div>
+        <label for="feature-title">Title</label>
+        <input id="feature-title" name="Title" required maxlength="200" placeholder="Users can add, complete and delete to-do items" />
+        <label for="feature-prompt">Prompt <span class="muted">- describe the feature for the agent team</span></label>
+        <textarea id="feature-prompt" name="Prompt" rows="10" required maxlength="20000"
+                  placeholder="What should users be able to do? Which fields, rules and screens? Anything about the data, the API or how it should look."></textarea>
+        <label class="checkbox"><input type="checkbox" name="StartNow" value="true" checked /> Start the agent team now</label>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-azure">Save</button>
+            <button type="button" class="btn btn-secondary" data-role="close">Cancel</button>
+        </div>
+    </form>
+</dialog>
+
+@section Scripts {
+    <script src="~/js/board.js" asp-append-version="true"></script>
+}

@@ -1,0 +1,45 @@
+@model PipelineRun
+@* Live agent steps of a run. run.js streams what happens after this snapshot (and steps added later, from the template). *@
+<div id="run" data-events-url="@Url.Action("Events", "Runs", new { id = Model.Id, after = Model.LastSeq })"
+     data-finished="@Model.IsFinished.ToString().ToLowerInvariant()"
+     data-reload-on-finish="@((ViewData["ReloadOnFinish"] as bool? == true).ToString().ToLowerInvariant())">
+    @for (var i = 0; i < Model.Steps.Count; i++)
+    {
+        var step = Model.Steps[i];
+        var stepStatus = step.Status.ToString().ToLowerInvariant();
+        <section class="card step-card" data-status="@stepStatus" data-agent-id="@step.AgentId">
+            <div class="agent-header">
+                <span class="step">@(i + 1)</span>
+                <h3 data-role="name">@step.Name</h3>
+                <span class="badge" data-role="model" hidden="@string.IsNullOrWhiteSpace(step.Model)">@step.Model</span>
+                <span class="tokens muted small">@(step.OutputTokens is null ? "" : $"{step.InputTokens:N0} in / {step.OutputTokens:N0} out tokens")</span>
+                <span class="status status-@stepStatus" data-role="status">@step.Status</span>
+                <button type="button" class="btn btn-link" data-role="copy" title="Copy this agent's reply">Copy</button>
+            </div>
+            <ul class="activity" data-role="activity">
+                @foreach (var activity in step.Activity)
+                {
+                    <li>&rsaquo; @activity</li>
+                }
+            </ul>
+            <pre class="output" data-role="output">@step.Output</pre>
+            <div class="alert alert-error" data-role="error" hidden="@(step.Error is null)">@step.Error</div>
+        </section>
+    }
+</div>
+
+<template id="step-template">
+    <section class="card step-card" data-status="pending">
+        <div class="agent-header">
+            <span class="step"></span>
+            <h3 data-role="name"></h3>
+            <span class="badge" data-role="model"></span>
+            <span class="tokens muted small"></span>
+            <span class="status status-pending" data-role="status">Pending</span>
+            <button type="button" class="btn btn-link" data-role="copy" title="Copy this agent's reply">Copy</button>
+        </div>
+        <ul class="activity" data-role="activity"></ul>
+        <pre class="output" data-role="output"></pre>
+        <div class="alert alert-error" data-role="error" hidden></div>
+    </section>
+</template>

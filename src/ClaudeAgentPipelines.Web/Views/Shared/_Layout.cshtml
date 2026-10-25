@@ -8,14 +8,16 @@
 </head>
 <body>
     <header class="topbar">
-        <a class="brand" asp-controller="Pipelines" asp-action="Index">
+        <a class="brand" asp-controller="Boards" asp-action="Index">
             <span class="brand-mark">&#10022;</span> Claude Agent Pipelines
         </a>
         @if (User.Identity?.IsAuthenticated == true)
         {
             <nav class="nav">
+                <a asp-controller="Boards" asp-action="Index">Boards</a>
                 <a asp-controller="Pipelines" asp-action="Index">Pipelines</a>
                 <a asp-controller="Runs" asp-action="Index">Runs</a>
+                <a asp-controller="Azure" asp-action="Index">Azure</a>
             </nav>
             <div class="account">
                 <span class="account-name" title="Signed in with Claude">@User.Identity.Name</span>
@@ -26,7 +28,7 @@
         }
     </header>
 
-    <main class="container">
+    <main class="container@(ViewData["Wide"] as bool? == true ? " container-wide" : "")">
         @if (TempData["Message"] is string message)
         {
             <div class="alert alert-ok">@message</div>

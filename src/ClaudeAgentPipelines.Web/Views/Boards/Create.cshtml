@@ -1,0 +1,30 @@
+@model BoardForm
+@{
+    ViewData["Title"] = "New board";
+}
+
+<h1>New board</h1>
+
+<form class="card form" asp-action="Create" method="post">
+    <div asp-validation-summary="ModelOnly" class="alert alert-error"></div>
+
+    <label asp-for="Name">Name</label>
+    <input asp-for="Name" placeholder="Contoso Tasks" autofocus />
+    <span asp-validation-for="Name" class="field-error"></span>
+
+    <label asp-for="Description">What is this application? <span class="muted">(every agent reads this)</span></label>
+    <textarea asp-for="Description" rows="4" placeholder="A task tracker for small teams: projects, tasks with due dates and assignees, and a dashboard."></textarea>
+
+    <label asp-for="WorkspacePath">Workspace folder <span class="muted">(optional)</span></label>
+    <input asp-for="WorkspacePath" placeholder="Leave empty to create a new folder under your user profile\ClaudeAgentBoards" />
+    <span asp-validation-for="WorkspacePath" class="field-error"></span>
+    <p class="muted small">
+        The agents write the code here: <code>database/</code>, <code>backend/</code>, <code>frontend/</code>, <code>tests/</code>
+        and <code>infra/</code>. Use an empty folder, or an existing repository with the same layout.
+    </p>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create board</button>
+        <a class="btn btn-secondary" asp-action="Index">Cancel</a>
+    </div>
+</form>

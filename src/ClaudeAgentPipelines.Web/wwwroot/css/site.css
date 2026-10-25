@@ -14,6 +14,12 @@
     --running-bg: #fff4d6;
     --radius: 10px;
     --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+    /* Azure Boards look for boards and work items */
+    --azure-blue: #0078d4;
+    --azure-blue-dark: #106ebe;
+    --column-bg: #f4f3ef;
+    --feature: #773b93;
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, .14), 0 0 1px rgba(0, 0, 0, .1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +35,9 @@
         --error: #ffaba3;
         --running-bg: #3d3214;
         --running: #f2c94c;
+        --column-bg: #252422;
+        --feature: #b57fcf;
+        --card-shadow: 0 1px 2px rgba(0, 0, 0, .5);
     }
 }
 
@@ -126,7 +135,7 @@ code { font-family: var(--mono); font-size: .9em; }
 }
 
 .form label { display: block; font-weight: 500; margin: .75rem 0 .3rem; }
-.form input:not([type=file]):not([type=hidden]), .form textarea {
+.form input:not([type=file]):not([type=hidden]):not([type=checkbox]), .form textarea {
     width: 100%;
     padding: .55rem .7rem;
     border: 1px solid var(--border);
@@ -249,6 +258,227 @@ code { font-family: var(--mono); font-size: .9em; }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Boards ---------- */
+
+.container-wide { max-width: none; }
+
+.board-header { display: flex; align-items: center; gap: 1.5rem; margin-bottom: .75rem; flex-wrap: wrap; }
+.breadcrumb { font-size: 1rem; }
+.breadcrumb a { color: var(--text); text-decoration: none; }
+.breadcrumb a:hover { color: var(--azure-blue); text-decoration: underline; }
+.breadcrumb span { color: var(--muted); margin: 0 .25rem; }
+.pivots { display: flex; gap: 1.25rem; }
+.pivot { color: var(--muted); text-decoration: none; padding: .3rem 0; border-bottom: 2px solid transparent; font-weight: 500; }
+.pivot:hover { color: var(--text); }
+.pivot.active { color: var(--text); border-bottom-color: var(--azure-blue); }
+
+.board-toolbar { display: flex; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.board-filter {
+    width: 260px;
+    padding: .4rem .6rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+}
+.board-azure { margin-left: auto; }
+
+.btn-azure { background: var(--azure-blue); color: #fff; border-radius: 2px; }
+.btn-azure:hover:not(:disabled) { background: var(--azure-blue-dark); }
+
+.kanban { display: flex; gap: .5rem; overflow-x: auto; align-items: stretch; min-height: 70vh; padding-bottom: .5rem; }
+.kanban-column {
+    flex: 1 0 200px;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    background: var(--column-bg);
+    border-radius: 4px;
+    transition: box-shadow .15s;
+}
+.kanban.dragging .kanban-column[data-stage="Planning"] { box-shadow: inset 0 0 0 2px var(--border); }
+.kanban .kanban-column.drop-target { box-shadow: inset 0 0 0 2px var(--azure-blue); }
+.column-header { display: flex; align-items: center; gap: .4rem; padding: .6rem .75rem; min-height: 2.9rem; cursor: help; }
+.column-title { font-weight: 600; }
+.column-count { color: var(--muted); font-size: .85rem; }
+.column-agents { margin-left: auto; display: flex; gap: 2px; }
+.column-add {
+    margin: 0 .5rem .25rem;
+    padding: .35rem;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--azure-blue);
+    font: inherit;
+    cursor: pointer;
+    border-radius: 2px;
+}
+.column-add:hover { background: rgba(0, 120, 212, .08); }
+.column-cards { display: flex; flex-direction: column; gap: .4rem; padding: .25rem .5rem .75rem; }
+
+/* Feature work item type icon (Azure uses a purple trophy). */
+.wi-icon {
+    display: inline-block;
+    width: .75rem;
+    height: .75rem;
+    flex: none;
+    background: var(--feature);
+    border-radius: 2px 2px 50% 50%;
+}
+.wi-card {
+    background: var(--surface);
+    border-left: 4px solid var(--feature);
+    border-radius: 2px;
+    box-shadow: var(--card-shadow);
+    padding: .5rem .6rem;
+    cursor: pointer;
+    font-size: .9rem;
+}
+.wi-card:hover { box-shadow: 0 3px 8px rgba(0, 0, 0, .18); }
+.wi-card[draggable="true"] { cursor: grab; }
+.wi-card[data-status="failed"] { border-left-color: var(--error); }
+.wi-card-head { display: flex; align-items: baseline; gap: .4rem; }
+.wi-id { font-weight: 700; }
+.wi-card-title { color: var(--text); text-decoration: none; font-weight: 500; overflow-wrap: anywhere; }
+.wi-card-title:hover { color: var(--azure-blue); text-decoration: underline; }
+.wi-fields { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; }
+.wi-fields:empty { display: none; }
+.wi-tag {
+    font-size: .72rem;
+    font-weight: 600;
+    padding: .05rem .45rem;
+    border-radius: 2px;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--border);
+}
+.wi-tag-running { background: var(--running-bg); color: var(--running); border-color: transparent; }
+.wi-tag-queued { background: rgba(0, 120, 212, .1); color: var(--azure-blue); border-color: transparent; }
+.wi-tag-completed { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.wi-tag-failed { background: var(--error-bg); color: var(--error); border-color: transparent; }
+.wi-progress { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; }
+.wi-progress-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.wi-progress-bar span { display: block; height: 100%; background: var(--ok); }
+.wi-card-foot { display: flex; align-items: center; gap: .5rem; margin-top: .45rem; }
+.wi-card-foot .btn-link { margin-left: auto; color: var(--azure-blue); }
+.wi-assigned { display: flex; gap: 2px; align-items: center; }
+.wi-error { color: var(--error); margin-top: .35rem; overflow-wrap: anywhere; }
+
+.avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 1.55rem;
+    height: 1.55rem;
+    border-radius: 50%;
+    font-size: .62rem;
+    font-weight: 700;
+    color: #fff;
+    background: #8a8886;
+    letter-spacing: .02em;
+}
+.avatar-planner { background: #8764b8; }
+.avatar-database { background: #ca5010; }
+.avatar-backend { background: #0078d4; }
+.avatar-frontend { background: #038387; }
+.avatar-testing { background: #498205; }
+.avatar-devops { background: #4f6bed; }
+.avatar-busy { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--running); }
+
+.stage-counts {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 .75rem;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: .25rem .75rem;
+    font-size: .85rem;
+}
+.stage-counts li { display: flex; justify-content: space-between; }
+
+.dialog {
+    border: none;
+    border-radius: 4px;
+    padding: 1.25rem 1.5rem;
+    width: min(720px, 94vw);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .3);
+}
+.dialog::backdrop { background: rgba(0, 0, 0, .35); }
+.dialog-header {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    border-top: 4px solid var(--feature);
+    margin: -1.25rem -1.5rem 0;
+    padding: 1rem 1.5rem 0;
+}
+.dialog-header h2 { margin: 0; }
+.form select {
+    width: 100%;
+    padding: .55rem .7rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+.form .checkbox { display: flex; align-items: center; gap: .5rem; font-weight: 500; }
+
+/* Work item form */
+.wi-form-header {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 4px solid var(--feature);
+    border-radius: 2px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+}
+.wi-type { display: flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+.wi-form-title { font-size: 1.45rem; font-weight: 600; margin: .35rem 0 .6rem; }
+.wi-form-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.5rem; font-size: .9rem; }
+.wi-form-meta > span { display: inline-flex; align-items: center; gap: .4rem; }
+.wi-form-actions { display: flex; gap: .5rem; margin-top: .9rem; }
+.wi-form-actions form { margin: 0; }
+.wi-state { display: inline-flex; align-items: center; gap: .35rem; font-weight: 600; }
+.wi-state::before { content: ""; width: .6rem; height: .6rem; border-radius: 50%; background: #b2b2b2; }
+.wi-state-planning::before { background: #8764b8; }
+.wi-state-development::before { background: #0078d4; }
+.wi-state-testing::before { background: #498205; }
+.wi-state-deploying::before { background: #4f6bed; }
+.wi-state-done::before { background: var(--ok); }
+.wi-form-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
+.wi-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wi-edit { margin-top: 1rem; }
+.wi-edit summary { cursor: pointer; color: var(--azure-blue); }
+.wi-path { font-family: var(--mono); overflow-wrap: anywhere; }
+.wi-side .card h2 { font-size: 1rem; }
+
+.task-list { list-style: none; padding: 0; margin: 0; }
+.task-list li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--border); font-size: .9rem; }
+.task-list li:last-child { border-bottom: none; }
+.task-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.task-state { font-size: .75rem; color: var(--muted); }
+.task-icon { width: .55rem; height: .55rem; border-radius: 50%; background: #b2b2b2; flex: none; }
+.task-list li[data-state="running"] .task-icon { background: var(--running); }
+.task-list li[data-state="running"] .task-state { color: var(--running); font-weight: 600; }
+.task-list li[data-state="completed"] .task-icon { background: var(--ok); }
+.task-list li[data-state="failed"] .task-icon { background: var(--error); }
+.task-list li[data-state="failed"] .task-state { color: var(--error); font-weight: 600; }
+.task-list li[data-state="cancelled"] { opacity: .6; }
+
+.azure-status { display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem; flex-wrap: wrap; }
+.azure-details { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: 0 0 .5rem; }
+.azure-details dt { color: var(--muted); }
+.azure-details dd { margin: 0; font-family: var(--mono); font-size: .88rem; }
+
+@media (max-width: 1000px) {
+    .wi-form-body { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 760px) {
     .run-layout, .row { grid-template-columns: 1fr; }

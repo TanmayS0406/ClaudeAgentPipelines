@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace ClaudeAgentPipelines.Pipelines;
 
-/// <summary>Starts pipeline runs in the background and keeps the active ones in memory.</summary>
+/// <summary>Starts runs (pipelines and board features) in the background and keeps the active ones in memory.</summary>
 public sealed class RunManager(
     PipelineRunner runner,
     RunRepository repository,
@@ -23,18 +23,27 @@ public sealed class RunManager(
             PipelineName = pipeline.Name,
             Input = input,
             StartedBy = startedBy,
-            Status = RunStatus.Running,
             Steps = pipeline.Agents.Select(a => new StepState
             {
                 AgentId = a.Id,
                 Name = a.Name,
                 Model = PipelineRunner.EffectiveModel(a, claudeOptions.CurrentValue)
-            }).ToList(),
-            Cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ApplicationStopping)
+            }).ToList()
         };
+        return Start(run, (r, token) => runner.RunAsync(pipeline, r, token));
+    }
+
+    /// <summary>
+    /// Runs <paramref name="execute"/> in the background. The run completes when it returns, is cancelled when it throws
+    /// <see cref="OperationCanceledException"/> after a cancel, and fails when it throws anything else.
+    /// </summary>
+    public PipelineRun Start(PipelineRun run, Func<PipelineRun, CancellationToken, Task> execute)
+    {
+        run.Status = RunStatus.Running;
+        run.Cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ApplicationStopping);
         _active[run.Id] = run;
 
-        _ = Task.Run(() => ExecuteAsync(pipeline, run));
+        _ = Task.Run(() => ExecuteAsync(run, execute));
         return run;
     }
 
@@ -66,12 +75,12 @@ public sealed class RunManager(
         return true;
     }
 
-    private async Task ExecuteAsync(Pipeline pipeline, PipelineRun run)
+    private async Task ExecuteAsync(PipelineRun run, Func<PipelineRun, CancellationToken, Task> execute)
     {
         var token = run.Cancellation!.Token;
         try
         {
-            await runner.RunAsync(pipeline, run, token);
+            await execute(run, token);
             run.Finish(RunStatus.Completed);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -80,7 +89,7 @@ public sealed class RunManager(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Pipeline run {RunId} of {Pipeline} failed", run.Id, run.PipelineName);
+            logger.LogWarning(ex, "Run {RunId} of {Pipeline} failed", run.Id, run.PipelineName);
             run.Finish(RunStatus.Failed, ex.Message);
         }
 

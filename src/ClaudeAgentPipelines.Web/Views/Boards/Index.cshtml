@@ -1,0 +1,50 @@
+@model IReadOnlyList<BoardSummary>
+@{
+    ViewData["Title"] = "Boards";
+}
+
+<div class="page-header">
+    <h1>Boards</h1>
+    <a class="btn btn-primary" asp-action="Create">New board</a>
+</div>
+
+@if (Model.Count == 0)
+{
+    <div class="card empty">
+        <p>
+            A board is a project the Claude agent team builds for you, feature by feature. Add a feature as a prompt and the
+            team plans it, writes the database scripts, the .NET API and the React UI in parallel, tests it, and prepares
+            (or runs) the Azure deployment.
+        </p>
+        <a class="btn btn-primary" asp-action="Create">Create your first board</a>
+    </div>
+}
+
+<div class="grid">
+    @foreach (var summary in Model)
+    {
+        var project = summary.Project;
+        <article class="card pipeline-card">
+            <h2><a asp-action="Board" asp-route-id="@project.Id">@project.Name</a></h2>
+            @if (!string.IsNullOrWhiteSpace(project.Description))
+            {
+                <p class="muted">@project.Description</p>
+            }
+            <ul class="stage-counts">
+                @foreach (var stage in Enum.GetValues<FeatureStage>())
+                {
+                    <li><span class="muted">@stage</span> <strong>@summary.Counts.GetValueOrDefault(stage)</strong></li>
+                }
+            </ul>
+            <p class="muted small truncate" title="@project.WorkspacePath">@project.WorkspacePath</p>
+            @if (summary.Active > 0)
+            {
+                <p><span class="status status-running">@summary.Active in progress</span></p>
+            }
+            <div class="card-actions">
+                <a class="btn btn-primary" asp-action="Board" asp-route-id="@project.Id">Open board</a>
+                <a class="btn btn-secondary" asp-action="Settings" asp-route-id="@project.Id">Settings</a>
+            </div>
+        </article>
+    }
+</div>

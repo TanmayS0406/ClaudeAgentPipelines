@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 using ClaudeAgentPipelines.Claude;
 using Microsoft.Agents.AI;
@@ -44,42 +43,7 @@ public sealed class PipelineRunner(
     {
         var agents = pipeline.Agents.Select((agent, index) => CreateAgent(pipeline, index, agent, workspace)).ToList();
         var workflow = AgentWorkflowBuilder.BuildSequential(pipeline.Name, agents);
-
-        await using var execution = await InProcessExecution.RunStreamingAsync(
-            workflow, new List<ChatMessage> { new(ChatRole.User, run.Input) }, cancellationToken: cancellationToken);
-        await execution.TrySendMessageAsync(new TurnToken(emitEvents: true));
-
-        Exception? failure = null;
-        await foreach (var evt in execution.WatchStreamAsync(cancellationToken))
-        {
-            switch (evt)
-            {
-                // Each agent executor is invoked with the accumulated messages and then with the turn token that starts it.
-                case ExecutorInvokedEvent { Data: TurnToken } invoked when FindAgentId(pipeline, invoked.ExecutorId) is { } agentId:
-                    run.StepStarted(agentId);
-                    break;
-
-                case AgentResponseUpdateEvent { Update: var update }:
-                    HandleUpdate(pipeline, run, update);
-                    break;
-
-                case ExecutorCompletedEvent completed when FindAgentId(pipeline, completed.ExecutorId) is { } agentId:
-                    run.StepCompleted(agentId);
-                    break;
-
-                case ExecutorFailedEvent failed:
-                    failure = Unwrap(failed.Data as Exception) ?? new InvalidOperationException("An agent failed.");
-                    if (FindAgentId(pipeline, failed.ExecutorId) is { } failedId) run.StepFailed(failedId, failure.Message);
-                    break;
-
-                case WorkflowErrorEvent error:
-                    failure ??= Unwrap(error.Exception) ?? new InvalidOperationException("The pipeline failed.");
-                    break;
-            }
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        if (failure is not null) throw new PipelineFailedException(failure.Message, failure);
+        await AgentWorkflowExecution.RunAsync(workflow, run.Input, run, pipeline.Agents.Select(a => a.Id).ToList(), cancellationToken);
     }
 
     private AIAgent CreateAgent(Pipeline pipeline, int index, AgentDefinition agent, string workspace)
@@ -130,44 +94,4 @@ public sealed class PipelineRunner(
         }
         return sb.ToString();
     }
-
-    private static void HandleUpdate(Pipeline pipeline, PipelineRun run, AgentResponseUpdate update)
-    {
-        var agentId = update.AgentId;
-        if (agentId is null || pipeline.Agents.All(a => a.Id != agentId)) return;
-
-        // An agent can stream before ExecutorInvokedEvent is seen; starting twice is a no-op.
-        run.StepStarted(agentId);
-
-        if (update.RawRepresentation is ChatResponseUpdate { AdditionalProperties: { } properties }
-            && properties.TryGetValue(ClaudeCodeChatClient.ActivityKey, out var activity) && activity is string text)
-        {
-            run.StepActivity(agentId, text);
-        }
-
-        foreach (var usage in update.Contents.OfType<UsageContent>())
-        {
-            run.StepUsage(agentId, usage.Details.InputTokenCount, usage.Details.OutputTokenCount);
-        }
-
-        var delta = update.Text;
-        if (!string.IsNullOrEmpty(delta)) run.StepText(agentId, delta);
-    }
-
-    /// <summary>Agent executors are named "{agent name}_{agent id}".</summary>
-    private static string? FindAgentId(Pipeline pipeline, string? executorId) =>
-        executorId is null
-            ? null
-            : pipeline.Agents.FirstOrDefault(a => executorId == a.Id || executorId.EndsWith("_" + a.Id, StringComparison.Ordinal))?.Id;
-
-    private static Exception? Unwrap(Exception? exception)
-    {
-        while (exception is TargetInvocationException or AggregateException && exception.InnerException is not null)
-        {
-            exception = exception.InnerException;
-        }
-        return exception;
-    }
 }
-
-public sealed class PipelineFailedException(string message, Exception inner) : Exception(message, inner);

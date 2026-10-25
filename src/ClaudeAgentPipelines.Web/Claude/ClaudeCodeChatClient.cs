@@ -18,6 +18,12 @@ public sealed class ClaudeCodeChatClientOptions
     /// <summary>Built-in Claude Code tools the agent may use. Read-only by default.</summary>
     public IReadOnlyList<string> Tools { get; init; } = ["Read", "Glob", "Grep"];
 
+    /// <summary>
+    /// Permission rules for those tools, such as <c>Edit(./backend/**)</c> or <c>Bash(dotnet build:*)</c>.
+    /// Anything they don't allow is refused. Null = allow <see cref="Tools"/> without restrictions.
+    /// </summary>
+    public IReadOnlyList<string>? AllowedTools { get; init; }
+
     /// <summary>Model alias or id. Null = CLI default. <see cref="ChatOptions.ModelId"/> wins when set.</summary>
     public string? Model { get; init; }
 
@@ -66,7 +72,7 @@ public sealed class ClaudeCodeChatClient(ClaudeCli cli, ClaudeCodeChatClientOpti
             Directory.CreateDirectory(options.WorkingDirectory);
             using var process = new Process
             {
-                StartInfo = cli.CreateStartInfo(cliPath, BuildArguments(systemPromptFile, model), options.WorkingDirectory)
+                StartInfo = CliProcess.CreateStartInfo(cliPath, BuildArguments(systemPromptFile, model), options.WorkingDirectory)
             };
             process.Start();
 
@@ -77,7 +83,7 @@ public sealed class ClaudeCodeChatClient(ClaudeCli cli, ClaudeCodeChatClientOpti
             }
 
             var reader = new StreamJsonReader();
-            await using (timeout.Token.Register(() => ClaudeCli.KillTree(process)))
+            await using (timeout.Token.Register(() => CliProcess.KillTree(process)))
             {
                 // Killing the process closes stdout, which ends this loop.
                 string? line;
@@ -143,10 +149,11 @@ public sealed class ClaudeCodeChatClient(ClaudeCli cli, ClaudeCodeChatClientOpti
             "--permission-mode", "default"
         };
 
-        if (options.Tools.Count > 0)
+        var allowed = options.AllowedTools ?? options.Tools;
+        if (allowed.Count > 0)
         {
             args.Add("--allowedTools");
-            args.AddRange(options.Tools);
+            args.AddRange(allowed);
         }
         if (options.AdditionalDirectories.Count > 0)
         {
@@ -335,7 +342,7 @@ public sealed class ClaudeCodeChatClient(ClaudeCli cli, ClaudeCodeChatClientOpti
             var filePath = (string?)input?["file_path"];
             var detail = !string.IsNullOrWhiteSpace(filePath)
                 ? Path.GetFileName(filePath)
-                : (string?)input?["pattern"] ?? (string?)input?["path"];
+                : (string?)input?["command"] ?? (string?)input?["pattern"] ?? (string?)input?["path"];
             if (string.IsNullOrWhiteSpace(detail)) return label;
 
             detail = detail.Trim().ReplaceLineEndings(" ");

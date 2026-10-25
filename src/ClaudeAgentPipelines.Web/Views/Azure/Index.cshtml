@@ -1,0 +1,34 @@
+@{
+    ViewData["Title"] = "Azure";
+}
+
+<h1>Azure</h1>
+
+<section class="card">
+    <h2>Azure sign-in</h2>
+    <p class="muted">
+        Works like the Claude sign-in: <strong>Sign in to Azure</strong> opens <code>az login</code> (the official Azure CLI) on
+        this computer, and you finish signing in in your browser. The app never sees your Azure password or tokens. The DevOps
+        agent's <code>az</code> commands use this sign-in, and only for boards where deployment is turned on.
+    </p>
+    <div class="azure-status" data-azure-status data-status-url="@Url.Action("Status")" data-start-url="@Url.Action("StartLogin")">
+        <span data-role="text" class="muted">Checking the Azure sign-in...</span>
+        <button type="button" class="btn btn-primary" data-role="login" hidden>Sign in to Azure</button>
+    </div>
+    <dl class="azure-details" data-role="details" hidden>
+        <dt>Account</dt><dd data-field="user"></dd>
+        <dt>Default subscription</dt><dd data-field="subscriptionName"></dd>
+        <dt>Subscription ID</dt><dd data-field="subscriptionId"></dd>
+        <dt>Tenant</dt><dd data-field="tenantId"></dd>
+    </dl>
+    <div class="form-actions">
+        <button type="button" class="btn btn-secondary" data-role="refresh">Refresh</button>
+        <form asp-action="Logout" method="post" data-confirm="Sign the Azure CLI on this computer out? This affects every tool that uses it.">
+            <button type="submit" class="btn btn-link btn-danger">Sign out of Azure</button>
+        </form>
+    </div>
+</section>
+
+@section Scripts {
+    <script src="~/js/azure.js" asp-append-version="true"></script>
+}

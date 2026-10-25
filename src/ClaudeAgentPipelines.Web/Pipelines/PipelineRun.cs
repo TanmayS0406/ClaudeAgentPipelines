@@ -50,6 +50,14 @@ public sealed class PipelineRun
     public string Id { get; set; } = Ids.New();
     public string PipelineId { get; set; } = string.Empty;
     public string PipelineName { get; set; } = string.Empty;
+
+    /// <summary>Set when the run builds a board feature instead of running a pipeline.</summary>
+    public string? ProjectId { get; set; }
+    public string? FeatureId { get; set; }
+
+    /// <summary>What the run is doing right now, for example "Testing (round 2)".</summary>
+    public string? Stage { get; set; }
+
     public string Input { get; set; } = string.Empty;
     public string StartedBy { get; set; } = string.Empty;
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -81,6 +89,9 @@ public sealed class PipelineRun
                 Id = Id,
                 PipelineId = PipelineId,
                 PipelineName = PipelineName,
+                ProjectId = ProjectId,
+                FeatureId = FeatureId,
+                Stage = Stage,
                 Input = Input,
                 StartedBy = StartedBy,
                 StartedAt = StartedAt,
@@ -125,6 +136,44 @@ public sealed class PipelineRun
             changed = _changed.Task;
         }
         return changed.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>Adds a step while the run is going (for example a fix round after failed tests).</summary>
+    internal void AddStep(StepState step)
+    {
+        lock (_lock)
+        {
+            if (IsFinished || Steps.Any(s => s.AgentId == step.AgentId)) return;
+            Steps.Add(step);
+            Publish(new RunEvent(0, "stepAdded", step.AgentId, step.Name, new { model = step.Model }));
+        }
+    }
+
+    internal void SetStage(string stage)
+    {
+        lock (_lock)
+        {
+            if (IsFinished) return;
+            Stage = stage;
+            Publish(new RunEvent(0, "stage", Text: stage));
+        }
+    }
+
+    /// <summary>Output of a step so far (empty for unknown steps).</summary>
+    public string StepOutput(string agentId)
+    {
+        lock (_lock)
+        {
+            return Steps.FirstOrDefault(s => s.AgentId == agentId)?.Output ?? string.Empty;
+        }
+    }
+
+    public StepStatus? StepStatusOf(string agentId)
+    {
+        lock (_lock)
+        {
+            return Steps.FirstOrDefault(s => s.AgentId == agentId)?.Status;
+        }
     }
 
     internal void StepStarted(string agentId) => UpdateStep(agentId, step =>

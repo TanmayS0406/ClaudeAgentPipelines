@@ -1,0 +1,188 @@
+@model FeatureDetailsViewModel
+@{
+    var project = Model.Project;
+    var feature = Model.Feature;
+    var run = Model.Run;
+    ViewData["Title"] = $"Feature {feature.Number}: {feature.Title}";
+    ViewData["Wide"] = true;
+    ViewData["ReloadOnFinish"] = run is { IsFinished: false };
+    var runStatus = run?.Status.ToString().ToLowerInvariant() ?? "pending";
+    var statusLabel = feature.Status switch
+    {
+        FeatureStatus.NotStarted => "Not started",
+        FeatureStatus.Running => "In progress",
+        _ => feature.Status.ToString()
+    };
+    var tasks = feature.Tasks;
+}
+
+<div class="board-header">
+    <div class="breadcrumb">
+        <a asp-controller="Boards" asp-action="Index">Boards</a> <span>/</span>
+        <a asp-controller="Boards" asp-action="Board" asp-route-id="@project.Id">@project.Name</a> <span>/</span>
+        <strong>Feature @feature.Number</strong>
+    </div>
+</div>
+
+<article class="wi-form">
+    <header class="wi-form-header">
+        <div class="wi-type"><span class="wi-icon"></span> FEATURE @feature.Number</div>
+        <h1 class="wi-form-title">@feature.Title</h1>
+        <div class="wi-form-meta">
+            <span>
+                <span class="muted">State</span>
+                <span class="wi-state wi-state-@feature.Stage.ToString().ToLowerInvariant()">@feature.Stage</span>
+            </span>
+            <span>
+                <span class="muted">Status</span>
+                <span class="wi-tag wi-tag-@feature.Status.ToString().ToLowerInvariant()">@statusLabel</span>
+            </span>
+            @if (run is { IsFinished: false })
+            {
+                <span><span class="muted">Now</span> <span id="run-stage">@run.Stage</span></span>
+            }
+            <span class="muted small">Created by @feature.CreatedBy, @feature.CreatedAt.ToLocalTime().ToString("g")</span>
+        </div>
+        <div class="wi-form-actions">
+            @if (!feature.IsActive)
+            {
+                <form asp-action="Start" asp-route-projectId="@project.Id" asp-route-id="@feature.Id" method="post"
+                      data-confirm="@(feature.Status == FeatureStatus.NotStarted ? null : "Start the agent team on this feature again? It builds on the code that is already in the workspace.")">
+                    <button type="submit" class="btn btn-azure">
+                        @(feature.Status == FeatureStatus.NotStarted ? "▶ Start agent team" : feature.Status == FeatureStatus.Completed ? "↻ Run again" : "↻ Retry")
+                    </button>
+                </form>
+            }
+            <form id="cancel-form" asp-action="Cancel" asp-route-projectId="@project.Id" asp-route-id="@feature.Id" method="post"
+                  hidden="@(!feature.IsActive)" data-confirm="Stop the agents working on this feature?">
+                <button type="submit" class="btn btn-danger">Cancel</button>
+            </form>
+            <a class="btn btn-secondary" asp-controller="Boards" asp-action="Board" asp-route-id="@project.Id">Back to board</a>
+        </div>
+    </header>
+
+    @if (feature.Error is not null && feature.Status == FeatureStatus.Failed)
+    {
+        <div class="alert alert-error">@feature.Error</div>
+    }
+    <div id="run-error" class="alert alert-error" hidden></div>
+    <span id="run-status" class="status status-@runStatus" hidden>@run?.Status</span>
+
+    <div class="wi-form-body">
+        <div class="wi-main">
+            <section class="card">
+                <h2>Description</h2>
+                <div class="wi-description">@feature.Prompt</div>
+                @if (!feature.IsActive)
+                {
+                    <details class="wi-edit">
+                        <summary>Edit</summary>
+                        <form class="form" asp-action="Update" asp-route-projectId="@project.Id" asp-route-id="@feature.Id" method="post">
+                            <label for="edit-title">Title</label>
+                            <input id="edit-title" name="Title" value="@feature.Title" required maxlength="200" />
+                            <label for="edit-prompt">Prompt</label>
+                            <textarea id="edit-prompt" name="Prompt" rows="10" required maxlength="20000">@feature.Prompt</textarea>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-secondary">Save</button>
+                            </div>
+                        </form>
+                    </details>
+                }
+            </section>
+
+            <h2 class="section-title">Agent activity</h2>
+            @if (run is null)
+            {
+                <div class="card empty muted">The agent team has not worked on this feature yet. Click <strong>Start agent team</strong>.</div>
+            }
+            else
+            {
+                <partial name="_RunSteps" model="run" />
+            }
+        </div>
+
+        <aside class="wi-side">
+            <section class="card">
+                <h2>Child tasks</h2>
+                @if (tasks.Count == 0)
+                {
+                    <p class="muted small">Created when the team starts: Planner, Database, Backend, Frontend, Tester, DevOps.</p>
+                }
+                <ul class="task-list">
+                    @foreach (var task in tasks)
+                    {
+                        var state = task.State switch
+                        {
+                            TaskState.ToDo => "pending",
+                            TaskState.Doing => "running",
+                            TaskState.Done => "completed",
+                            TaskState.Failed => "failed",
+                            _ => "cancelled"
+                        };
+                        var label = task.State switch { TaskState.ToDo => "To do", _ => task.State.ToString() };
+                        <li data-task-id="@task.StepId" data-state="@state">
+                            <span class="task-icon"></span>
+                            <span class="avatar avatar-@task.Role.ToString().ToLowerInvariant()">@Team.Initials(task.Role)</span>
+                            <span class="task-title">@task.Title</span>
+                            <span class="task-state" data-role="task-state">@label</span>
+                        </li>
+                    }
+                </ul>
+            </section>
+
+            <section class="card">
+                <h2>Deployment</h2>
+                @if (feature.DeploymentUrl is not null)
+                {
+                    <p><a href="@feature.DeploymentUrl" target="_blank" rel="noopener noreferrer">@feature.DeploymentUrl</a></p>
+                }
+                else
+                {
+                    <p class="muted small">
+                        @(project.Azure.DeployEnabled
+                            ? $"Deploys to resource group {project.Azure.ResourceGroup} once the tests pass."
+                            : "Deployment is off: the DevOps agent writes and validates infra/ and azure-pipelines.yml.")
+                    </p>
+                }
+                <a class="small" asp-controller="Boards" asp-action="Settings" asp-route-id="@project.Id" asp-fragment="azure">Azure settings</a>
+            </section>
+
+            <section class="card">
+                <h2>Workspace</h2>
+                <p class="small wi-path" title="@project.WorkspacePath">@project.WorkspacePath</p>
+                @if (feature.PlanPath is not null)
+                {
+                    <p class="small">Technical plan: <code>@feature.PlanPath</code></p>
+                }
+            </section>
+
+            @if (Model.History.Count > 0)
+            {
+                <section class="card">
+                    <h2>Earlier runs</h2>
+                    <ul class="plain-list small">
+                        @foreach (var past in Model.History)
+                        {
+                            <li>
+                                <a asp-controller="Runs" asp-action="Details" asp-route-id="@past.Id">@past.StartedAt.ToLocalTime().ToString("g")</a>
+                                <span class="status status-@past.Status.ToString().ToLowerInvariant()">@past.Status</span>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+
+            @if (!feature.IsActive)
+            {
+                <form class="danger-zone" asp-action="Delete" asp-route-projectId="@project.Id" asp-route-id="@feature.Id" method="post"
+                      data-confirm="Delete feature #@feature.Number? The code the agents wrote stays in the workspace.">
+                    <button type="submit" class="btn btn-link btn-danger">Delete feature</button>
+                </form>
+            }
+        </aside>
+    </div>
+</article>
+
+@section Scripts {
+    <script src="~/js/run.js" asp-append-version="true"></script>
+}

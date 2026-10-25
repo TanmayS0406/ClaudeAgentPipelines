@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using ClaudeAgentPipelines;
+using ClaudeAgentPipelines.Azure;
+using ClaudeAgentPipelines.Board;
 using ClaudeAgentPipelines.Claude;
 using ClaudeAgentPipelines.Pipelines;
 using ClaudeAgentPipelines.Security;
@@ -14,6 +16,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<ClaudeOptions>(builder.Configuration.GetSection(ClaudeOptions.Section));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.Section));
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.Section));
+builder.Services.Configure<AzureOptions>(builder.Configuration.GetSection(AzureOptions.Section));
+builder.Services.Configure<BoardOptions>(builder.Configuration.GetSection(BoardOptions.Section));
 
 builder.Services.AddSingleton<ClaudeCli>();
 builder.Services.AddSingleton<ClaudeAccountService>();
@@ -21,6 +25,12 @@ builder.Services.AddSingleton<PipelineStore>();
 builder.Services.AddSingleton<RunRepository>();
 builder.Services.AddSingleton<PipelineRunner>();
 builder.Services.AddSingleton<RunManager>();
+builder.Services.AddSingleton<AzureCli>();
+builder.Services.AddSingleton<AzureAccountService>();
+builder.Services.AddSingleton<BoardStore>();
+builder.Services.AddSingleton<BoardNotifier>();
+builder.Services.AddSingleton<FeatureOrchestrator>();
+builder.Services.AddSingleton<FeatureManager>();
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -81,8 +91,9 @@ app.UseAuthorization();
 
 app.MapControllerRoute(
     name: "default",
-    pattern: "{controller=Pipelines}/{action=Index}/{id?}");
+    pattern: "{controller=Boards}/{action=Index}/{id?}");
 
 await app.Services.GetRequiredService<PipelineStore>().EnsureSamplePipelineAsync();
+await app.Services.GetRequiredService<FeatureManager>().RecoverAsync();
 
 app.Run();

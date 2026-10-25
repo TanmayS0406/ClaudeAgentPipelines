@@ -1,0 +1,143 @@
+@model BoardSettingsViewModel
+@{
+    var project = Model.Project;
+    ViewData["Title"] = project.Name + " settings";
+    var defaultModelLabel = string.IsNullOrWhiteSpace(Model.DefaultModel) ? "Claude Code default" : Model.DefaultModel;
+    string[] regions = ["eastus", "eastus2", "westus2", "westus3", "centralus", "northeurope", "westeurope", "uksouth", "francecentral",
+                        "germanywestcentral", "swedencentral", "centralindia", "southeastasia", "japaneast", "australiaeast", "canadacentral", "brazilsouth"];
+}
+
+<datalist id="model-options">
+    @foreach (var option in Model.ModelOptions)
+    {
+        <option value="@option"></option>
+    }
+</datalist>
+<datalist id="region-options">
+    @foreach (var region in regions)
+    {
+        <option value="@region"></option>
+    }
+</datalist>
+
+<div class="board-header">
+    <div class="breadcrumb">
+        <a asp-action="Index">Boards</a> <span>/</span> <strong>@project.Name</strong>
+    </div>
+    <nav class="pivots">
+        <a class="pivot" asp-action="Board" asp-route-id="@project.Id">Board</a>
+        <a class="pivot active" asp-action="Settings" asp-route-id="@project.Id">Settings &amp; team</a>
+    </nav>
+</div>
+
+<form class="form" asp-action="Settings" asp-route-id="@project.Id" method="post">
+    <section class="card">
+        <h2>General</h2>
+        <label for="board-name">Name</label>
+        <input id="board-name" name="Name" value="@project.Name" required maxlength="100" />
+        <label for="board-description">What is this application? <span class="muted">(every agent reads this)</span></label>
+        <textarea id="board-description" name="Description" rows="3" maxlength="2000">@project.Description</textarea>
+        <label for="board-workspace">Workspace folder</label>
+        <input id="board-workspace" name="WorkspacePath" value="@project.WorkspacePath" required maxlength="260" />
+        <p class="muted small">Where the agents write the code. Each finished feature is committed to the git repository in this folder.</p>
+    </section>
+
+    <section class="card" id="azure">
+        <h2>Azure</h2>
+        <div class="azure-status" data-azure-status data-status-url="@Url.Action("Status", "Azure")"
+             data-start-url="@Url.Action("StartLogin", "Azure")">
+            <span data-role="text" class="muted">Checking the Azure sign-in...</span>
+            <button type="button" class="btn btn-secondary" data-role="login" hidden>Sign in to Azure</button>
+        </div>
+
+        <div class="row">
+            <div>
+                <label for="azure-subscription">Subscription</label>
+                <select id="azure-subscription" name="SubscriptionId" data-subscriptions-url="@Url.Action("Subscriptions", "Azure")">
+                    <option value="">(none)</option>
+                    @if (project.Azure.SubscriptionId.Length > 0)
+                    {
+                        <option value="@project.Azure.SubscriptionId" selected>@project.Azure.SubscriptionName (@project.Azure.SubscriptionId)</option>
+                    }
+                </select>
+                <input type="hidden" id="azure-subscription-name" name="SubscriptionName" value="@project.Azure.SubscriptionName" />
+            </div>
+            <div>
+                <label for="azure-location">Location</label>
+                <input id="azure-location" name="Location" value="@project.Azure.Location" list="region-options" maxlength="40" />
+            </div>
+        </div>
+        <label for="azure-rg">Resource group</label>
+        <input id="azure-rg" name="ResourceGroup" value="@project.Azure.ResourceGroup" maxlength="90" placeholder="rg-@(project.Name.ToLowerInvariant().Replace(' ', '-'))-dev" />
+        <p class="muted small">Created by the deploy script if it doesn't exist. The DevOps agent only works in this resource group.</p>
+
+        <label class="checkbox">
+            <input type="checkbox" name="DeployEnabled" value="true" checked="@project.Azure.DeployEnabled" />
+            Let the DevOps agent deploy to Azure
+        </label>
+        <p class="muted small">
+            Off: the DevOps agent writes <code>infra/main.bicep</code>, <code>infra/deploy.ps1</code> and <code>azure-pipelines.yml</code>
+            and validates them, but creates nothing. On: once the tests pass it runs <code>infra/deploy.ps1</code> with the Azure CLI
+            signed in on this computer, which <strong>creates resources that cost money</strong> on the subscription.
+        </p>
+    </section>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save settings</button>
+    </div>
+</form>
+
+<h2 class="section-title">Agent team <span class="muted">- prompts and models used for features started from now on</span></h2>
+
+@foreach (var agent in project.Team)
+{
+    var role = agent.Role;
+    var permissions = Team.Permissions(role, project.Azure.DeployEnabled);
+    <section class="card agent" id="agent-@role">
+        <div class="agent-header">
+            <span class="avatar avatar-@role.ToString().ToLowerInvariant()">@Team.Initials(role)</span>
+            <h3>@agent.Name</h3>
+            <span class="badge">@Team.Label(role)</span>
+            <span class="muted small">@permissions.Summary</span>
+        </div>
+        <form class="form" asp-action="UpdateAgent" asp-route-id="@project.Id" asp-route-role="@role" method="post">
+            <div class="row">
+                <div>
+                    <label for="name-@role">Name</label>
+                    <input id="name-@role" name="Name" value="@agent.Name" required maxlength="80" />
+                </div>
+                <div>
+                    <label for="model-@role">Model</label>
+                    <input id="model-@role" name="Model" value="@agent.Model" list="model-options" maxlength="100" placeholder="@defaultModelLabel" />
+                </div>
+            </div>
+            <label for="instructions-@role">Prompt</label>
+            <textarea id="instructions-@role" name="Instructions" rows="10" required maxlength="20000">@agent.Instructions</textarea>
+            <details class="small muted">
+                <summary>Tool permissions</summary>
+                <ul>
+                    @foreach (var rule in permissions.AllowedTools)
+                    {
+                        <li><code>@rule</code></li>
+                    }
+                </ul>
+            </details>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-secondary">Save agent</button>
+            </div>
+        </form>
+        <form asp-action="ResetAgent" asp-route-id="@project.Id" asp-route-role="@role" method="post"
+              data-confirm="Reset @agent.Name to the default name, model and prompt?">
+            <button type="submit" class="btn btn-link small">Reset to default</button>
+        </form>
+    </section>
+}
+
+<form class="danger-zone" asp-action="Delete" asp-route-id="@project.Id" method="post"
+      data-confirm="Delete the board &quot;@project.Name&quot; and all its features? The workspace folder with the code is kept.">
+    <button type="submit" class="btn btn-link btn-danger">Delete board</button>
+</form>
+
+@section Scripts {
+    <script src="~/js/azure.js" asp-append-version="true"></script>
+}

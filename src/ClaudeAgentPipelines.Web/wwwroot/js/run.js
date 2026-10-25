@@ -1,5 +1,5 @@
-// Live view of a pipeline run: the page is rendered from a snapshot, then server-sent events
-// stream everything that happens after it (agent text, tool activity, status changes).
+// Live view of a run (a pipeline, or a feature on a board): the page is rendered from a snapshot, then server-sent
+// events stream everything that happens after it (agent text, tool activity, status changes, steps added later).
 (function () {
     const root = document.getElementById('run');
     if (!root) return;
@@ -7,6 +7,9 @@
     const runStatus = document.getElementById('run-status');
     const runError = document.getElementById('run-error');
     const cancelForm = document.getElementById('cancel-form');
+    const runStage = document.getElementById('run-stage');
+    const template = document.getElementById('step-template');
+    const taskLabels = { Pending: 'To do', Running: 'Doing', Completed: 'Done', Failed: 'Failed', Cancelled: 'Cancelled' };
 
     function step(agentId) {
         return root.querySelector('[data-agent-id="' + CSS.escape(agentId) + '"]');
@@ -20,6 +23,24 @@
     function setStepStatus(card, status) {
         setStatus(card.querySelector('[data-role="status"]'), status);
         card.dataset.status = status.toLowerCase();
+        // Child task list of a feature, if the page has one.
+        document.querySelectorAll('[data-task-id="' + CSS.escape(card.dataset.agentId) + '"]').forEach(task => {
+            task.dataset.state = status.toLowerCase();
+            const label = task.querySelector('[data-role="task-state"]');
+            if (label) label.textContent = taskLabels[status] || status;
+        });
+    }
+
+    function addStep(agentId, name, model) {
+        if (!template || step(agentId)) return;
+        const card = template.content.firstElementChild.cloneNode(true);
+        card.dataset.agentId = agentId;
+        card.querySelector('.step').textContent = root.querySelectorAll('.step-card').length + 1;
+        card.querySelector('[data-role="name"]').textContent = name;
+        const badge = card.querySelector('[data-role="model"]');
+        badge.textContent = model || '';
+        badge.hidden = !model;
+        root.appendChild(card);
     }
 
     root.addEventListener('click', event => {
@@ -43,6 +64,12 @@
         const card = evt.agentId ? step(evt.agentId) : null;
 
         switch (evt.type) {
+            case 'stepAdded':
+                addStep(evt.agentId, evt.text, evt.data && evt.data.model);
+                break;
+            case 'stage':
+                if (runStage) runStage.textContent = evt.text;
+                break;
             case 'stepStarted':
                 if (card) setStepStatus(card, 'Running');
                 break;
@@ -88,6 +115,8 @@
                     runError.textContent = evt.text;
                     runError.hidden = false;
                 }
+                // Feature pages reload to show the feature's final state (stage, deployment URL).
+                if (root.dataset.reloadOnFinish === 'true') setTimeout(() => location.reload(), 1500);
                 break;
         }
     };

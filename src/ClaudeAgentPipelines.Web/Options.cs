@@ -47,3 +47,37 @@ public sealed class SecurityOptions
     /// </summary>
     public bool AllowRemoteClients { get; set; }
 }
+
+/// <summary>"Azure" section: how the Azure CLI is found.</summary>
+public sealed class AzureOptions
+{
+    public const string Section = "Azure";
+
+    /// <summary>Full path to az.cmd / az. Empty = search PATH and the default install folder.</summary>
+    public string CliPath { get; set; } = string.Empty;
+}
+
+/// <summary>"Board" section: feature boards and the agent team that builds features.</summary>
+public sealed class BoardOptions
+{
+    public const string Section = "Board";
+
+    /// <summary>
+    /// Parent folder of project workspaces (the code the agents write). Empty = "ClaudeAgentBoards" in the user profile.
+    /// Kept outside the app folder so generated projects are not built or watched as part of this app.
+    /// </summary>
+    public string WorkspacesFolder { get; set; } = string.Empty;
+
+    /// <summary>One agent step is stopped after this long. Coding agents need longer than pipeline agents.</summary>
+    public int AgentTimeoutMinutes { get; set; } = 40;
+
+    /// <summary>How many times the testing agent runs; after a failed round the developers fix what it reported.</summary>
+    public int MaxTestRounds { get; set; } = 2;
+
+    /// <summary>Commit each finished feature to the workspace's git repository.</summary>
+    public bool CommitToGit { get; set; } = true;
+
+    public string EffectiveWorkspacesFolder => !string.IsNullOrWhiteSpace(WorkspacesFolder)
+        ? Path.GetFullPath(WorkspacesFolder)
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "ClaudeAgentBoards");
+}

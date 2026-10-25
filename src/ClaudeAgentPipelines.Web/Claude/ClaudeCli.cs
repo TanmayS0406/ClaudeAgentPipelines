@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 
@@ -24,8 +23,6 @@ public sealed record ClaudeAuthStatus(
 /// </summary>
 public sealed class ClaudeCli(IOptionsMonitor<ClaudeOptions> options)
 {
-    private static readonly UTF8Encoding Utf8NoBom = new(false);
-
     /// <summary>Resolves the CLI path from the setting, PATH, or the default install folders. Null when not found.</summary>
     public string? Locate()
     {
@@ -36,8 +33,7 @@ public sealed class ClaudeCli(IOptionsMonitor<ClaudeOptions> options)
         }
 
         var candidates = new List<string>();
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var dir in CliProcess.PathFolders())
         {
             if (OperatingSystem.IsWindows())
             {
@@ -55,18 +51,7 @@ public sealed class ClaudeCli(IOptionsMonitor<ClaudeOptions> options)
         candidates.Add(Path.Combine(home, ".local", "bin", OperatingSystem.IsWindows() ? "claude.exe" : "claude")); // native installer
         candidates.Add(Path.Combine(appData, "npm", "claude.cmd"));                                                  // npm -g install
 
-        foreach (var candidate in candidates)
-        {
-            try
-            {
-                if (File.Exists(candidate)) return candidate;
-            }
-            catch (ArgumentException)
-            {
-                // Malformed PATH entry.
-            }
-        }
-        return null;
+        return CliProcess.FindFirst(candidates);
     }
 
     /// <summary>Runs <c>claude auth status</c>.</summary>
@@ -111,15 +96,7 @@ public sealed class ClaudeCli(IOptionsMonitor<ClaudeOptions> options)
     /// Opens a console window on this computer running <c>claude auth login</c>, which takes the user through the
     /// browser sign-in. Returns the console process so the caller can tell when it closes.
     /// </summary>
-    public Process? StartLogin(string cliPath)
-    {
-        var info = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("cmd.exe", "/d /s /c \"" + QuoteArgument(cliPath) + " auth login & echo. & pause\"")
-            : new ProcessStartInfo(cliPath, "auth login");
-        info.UseShellExecute = true;
-        info.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Process.Start(info);
-    }
+    public Process? StartLogin(string cliPath) => CliProcess.StartConsole(cliPath, "auth login");
 
     public async Task LogoutAsync(CancellationToken cancellationToken)
     {
@@ -130,90 +107,9 @@ public sealed class ClaudeCli(IOptionsMonitor<ClaudeOptions> options)
         }
     }
 
-    /// <summary>
-    /// Builds a hidden, redirected process for the CLI. <c>.cmd</c> shims (npm installs) go through cmd.exe,
-    /// so arguments must not contain cmd metacharacters such as &amp; | &lt; &gt; ^.
-    /// </summary>
-    public ProcessStartInfo CreateStartInfo(string cliPath, IEnumerable<string> arguments, string workingDirectory)
+    private static async Task<(int ExitCode, string Output)> RunAsync(string cliPath, string[] arguments, CancellationToken cancellationToken)
     {
-        var args = string.Join(" ", arguments.Select(QuoteArgument));
-        var isShim = cliPath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
-                  || cliPath.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
-
-        var info = isShim
-            ? new ProcessStartInfo("cmd.exe", "/d /s /c \"" + QuoteArgument(cliPath) + " " + args + "\"")
-            : new ProcessStartInfo(cliPath, args);
-
-        info.UseShellExecute = false;
-        info.CreateNoWindow = true;
-        info.RedirectStandardInput = true;
-        info.RedirectStandardOutput = true;
-        info.RedirectStandardError = true;
-        info.StandardOutputEncoding = Utf8NoBom;
-        info.StandardErrorEncoding = Utf8NoBom;
-        info.WorkingDirectory = workingDirectory;
-        return info;
-    }
-
-    /// <summary>Kills the process and its children (the CLI may spawn node / shell processes).</summary>
-    public static void KillTree(Process process)
-    {
-        try
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-            // Already gone.
-        }
-    }
-
-    /// <summary>Quotes one argument following the CommandLineToArgvW rules.</summary>
-    public static string QuoteArgument(string arg)
-    {
-        if (string.IsNullOrEmpty(arg)) return "\"\"";
-        if (arg.IndexOfAny([' ', '\t', '\n', '\v', '"']) < 0) return arg;
-
-        var sb = new StringBuilder("\"");
-        for (var i = 0; i < arg.Length; i++)
-        {
-            var backslashes = 0;
-            while (i < arg.Length && arg[i] == '\\') { backslashes++; i++; }
-
-            if (i == arg.Length)
-            {
-                sb.Append('\\', backslashes * 2);
-                break;
-            }
-            if (arg[i] == '"')
-            {
-                sb.Append('\\', backslashes * 2 + 1).Append('"');
-            }
-            else
-            {
-                sb.Append('\\', backslashes).Append(arg[i]);
-            }
-        }
-        return sb.Append('"').ToString();
-    }
-
-    private async Task<(int ExitCode, string Output)> RunAsync(string cliPath, string[] arguments, CancellationToken cancellationToken)
-    {
-        var info = CreateStartInfo(cliPath, arguments, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        using var process = new Process { StartInfo = info };
-        process.Start();
-        process.StandardInput.Close();
-
-        var stdout = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var stderr = process.StandardError.ReadToEndAsync(CancellationToken.None);
-
-        await using (cancellationToken.Register(() => KillTree(process)))
-        {
-            await Task.WhenAll(stdout, stderr);
-            await process.WaitForExitAsync(CancellationToken.None);
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        return (process.ExitCode, await stdout + await stderr);
+        var result = await CliProcess.RunAsync(cliPath, arguments, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cancellationToken);
+        return (result.ExitCode, result.Output + result.Error);
     }
 }
