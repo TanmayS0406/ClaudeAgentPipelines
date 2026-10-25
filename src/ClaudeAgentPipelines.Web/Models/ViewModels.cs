@@ -118,9 +118,14 @@ public sealed record FeatureCard(
     int TasksTotal,
     IReadOnlyList<CardAssignee> Assigned,
     string? DeploymentUrl,
+    IReadOnlyList<int> DependsOn,
+    IReadOnlyList<int> BlockedBy,
+    bool Planned,
+    string? OrchestratorNote,
+    string? Branch,
     DateTimeOffset UpdatedAt)
 {
-    public static FeatureCard From(Feature feature, string? stageLabel)
+    public static FeatureCard From(Feature feature, string? stageLabel, IReadOnlyList<int> blockedBy)
     {
         var assigned = feature.Tasks.Where(t => t.State == TaskState.Doing)
             .Select(t => new CardAssignee(Team.Initials(t.Role), t.Title, t.Role.ToString().ToLowerInvariant()))
@@ -138,16 +143,31 @@ public sealed record FeatureCard(
             feature.Tasks.Count,
             assigned,
             feature.DeploymentUrl,
+            feature.DependsOn,
+            blockedBy,
+            feature.PlannedAt is not null,
+            feature.OrchestratorNote,
+            feature.Branch,
             feature.UpdatedAt);
     }
 }
 
 public sealed record CardAssignee(string Initials, string Name, string Role);
 
-public sealed record BoardViewModel(Project Project, IReadOnlyList<FeatureCard> Cards, long Version);
+public sealed record BoardViewModel(Project Project, IReadOnlyList<FeatureCard> Cards, long Version, int MaxParallelLimit);
+
+/// <summary>The board's orchestrator state, as JSON for the board page.</summary>
+public sealed record OrchestrationCard(bool Autopilot, int MaxParallel, bool Planning, string? RunId, string? Summary, string? Error,
+                                       DateTimeOffset? PlannedAt)
+{
+    public static OrchestrationCard From(Project project) => new(
+        project.Autopilot, project.MaxParallelFeatures, project.Orchestration.Planning, project.Orchestration.RunId,
+        project.Orchestration.Summary, project.Orchestration.Error, project.Orchestration.PlannedAt);
+}
 
 public sealed record BoardSettingsViewModel(Project Project, IReadOnlyList<string> ModelOptions, string DefaultModel, string? Error = null);
 
-public sealed record FeatureDetailsViewModel(Project Project, Feature Feature, PipelineRun? Run, IReadOnlyList<PipelineRun> History);
+public sealed record FeatureDetailsViewModel(Project Project, Feature Feature, PipelineRun? Run, IReadOnlyList<PipelineRun> History,
+                                             IReadOnlyList<Feature> Dependencies, IReadOnlyList<int> BlockedBy);
 
 public sealed record BoardSummary(Project Project, IReadOnlyDictionary<FeatureStage, int> Counts, int Active);

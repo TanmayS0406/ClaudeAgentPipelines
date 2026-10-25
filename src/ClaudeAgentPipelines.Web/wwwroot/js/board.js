@@ -1,5 +1,5 @@
-// Feature board: renders the cards into their columns, keeps them live over server-sent events, filters them, and
-// starts a feature when its card is dragged from New to Planning (or its Start button is clicked).
+// Feature board: renders the cards into their columns, keeps them and the orchestrator bar live over server-sent
+// events, filters them, and starts a feature when its card is dragged from New to Planning (or Start is clicked).
 (function () {
     const board = document.getElementById('board');
     if (!board) return;
@@ -7,7 +7,10 @@
     const token = document.querySelector('#board-token input[name="__RequestVerificationToken"]').value;
     const filter = document.getElementById('board-filter');
     const dialog = document.getElementById('new-feature');
-    let cards = JSON.parse(document.getElementById('board-data').textContent);
+    const orchestratorBar = document.getElementById('orchestrator');
+    const initial = JSON.parse(document.getElementById('board-data').textContent);
+    let cards = initial.cards;
+    let orchestration = initial.orchestration;
 
     const statusLabels = { NotStarted: '', Queued: 'Queued', Running: 'In progress', Failed: 'Failed', Cancelled: 'Cancelled', Completed: 'Completed' };
 
@@ -49,6 +52,25 @@
         }
         if (card.stageLabel && card.stageLabel !== card.stage) {
             fields.appendChild(el('span', 'wi-stage muted small', card.stageLabel));
+        }
+        if (card.status === 'NotStarted' && card.blockedBy.length > 0) {
+            const blocked = el('span', 'wi-tag wi-tag-blocked', 'Waiting for ' + card.blockedBy.map(n => '#' + n).join(', '));
+            blocked.title = card.orchestratorNote || '';
+            fields.appendChild(blocked);
+        } else if (card.status === 'NotStarted' && orchestration.autopilot && !card.planned) {
+            fields.appendChild(el('span', 'wi-tag', 'Not planned yet'));
+        } else if (card.status === 'NotStarted' && orchestration.autopilot && card.planned) {
+            fields.appendChild(el('span', 'wi-tag wi-tag-queued', 'Ready'));
+        }
+        if (card.dependsOn.length > 0 && !(card.status === 'NotStarted' && card.blockedBy.length > 0)) {
+            const after = el('span', 'wi-deps muted small', 'after ' + card.dependsOn.map(n => '#' + n).join(', '));
+            after.title = card.orchestratorNote || '';
+            fields.appendChild(after);
+        }
+        if (card.branch && card.status !== 'Completed') {
+            const branch = el('span', 'wi-branch small', card.branch);
+            branch.title = 'Git branch';
+            fields.appendChild(branch);
         }
         item.appendChild(fields);
 
@@ -97,7 +119,28 @@
         return item;
     }
 
+    function renderOrchestrator() {
+        if (!orchestratorBar) return;
+        const status = orchestratorBar.querySelector('[data-role="status"]');
+        const summary = orchestratorBar.querySelector('[data-role="summary"]');
+        status.replaceChildren();
+        orchestratorBar.classList.toggle('planning', orchestration.planning);
+
+        const mode = orchestration.autopilot
+            ? 'Autopilot on - up to ' + orchestration.maxParallel + ' feature' + (orchestration.maxParallel === 1 ? '' : 's') + ' in parallel'
+            : 'Autopilot off - start features yourself, or turn autopilot on';
+        status.appendChild(document.createTextNode(orchestration.planning ? 'Planning the backlog... ' : mode + '. '));
+        if (orchestration.runId) {
+            const link = el('a', '', orchestration.planning ? 'Watch' : 'Last plan');
+            link.href = url(orchestratorBar.dataset.runUrl, orchestration.runId);
+            status.appendChild(link);
+        }
+        summary.textContent = orchestration.error ? 'Last plan failed: ' + orchestration.error : (orchestration.summary || '');
+        summary.classList.toggle('wi-error', !!orchestration.error);
+    }
+
     function render() {
+        renderOrchestrator();
         const query = (filter.value || '').trim().toLowerCase();
         board.querySelectorAll('.kanban-column').forEach(column => {
             const list = column.querySelector('[data-role="cards"]');
@@ -126,7 +169,9 @@
     // Live updates.
     const source = new EventSource(board.dataset.eventsUrl);
     source.addEventListener('board', message => {
-        cards = JSON.parse(message.data).cards;
+        const data = JSON.parse(message.data);
+        cards = data.cards;
+        orchestration = data.orchestration;
         render();
     });
 

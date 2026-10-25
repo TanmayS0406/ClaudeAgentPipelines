@@ -20,11 +20,13 @@ public static class Team
 
     public static string Label(AgentRole role) => role switch
     {
+        AgentRole.Orchestrator => "Orchestrator",
         AgentRole.Planner => "Planner",
         AgentRole.Database => "Database",
         AgentRole.Backend => "Backend",
         AgentRole.Frontend => "Frontend",
         AgentRole.Testing => "Testing",
+        AgentRole.Integrator => "Release",
         AgentRole.DevOps => "DevOps",
         _ => role.ToString()
     };
@@ -32,23 +34,15 @@ public static class Team
     /// <summary>Two-letter "avatar" shown on board cards.</summary>
     public static string Initials(AgentRole role) => role switch
     {
+        AgentRole.Orchestrator => "OR",
         AgentRole.Planner => "PL",
         AgentRole.Database => "DB",
         AgentRole.Backend => "BE",
         AgentRole.Frontend => "UI",
         AgentRole.Testing => "QA",
+        AgentRole.Integrator => "RE",
         AgentRole.DevOps => "DO",
         _ => "AG"
-    };
-
-    public static string Folder(AgentRole role) => role switch
-    {
-        AgentRole.Database => "database",
-        AgentRole.Backend => "backend",
-        AgentRole.Frontend => "frontend",
-        AgentRole.Testing => "tests",
-        AgentRole.DevOps => "infra",
-        _ => string.Empty
     };
 
     public static RolePermissions Permissions(AgentRole role, bool deployEnabled)
@@ -67,6 +61,7 @@ public static class Team
         // Edit rules also cover the Write tool. Anything not listed is refused: nobody can approve a prompt.
         return role switch
         {
+            AgentRole.Orchestrator => new(read, read, "Reads the main workspace. Writes nothing."),
             AgentRole.Planner => new(read, read, "Reads the workspace. Writes nothing."),
             AgentRole.Database => new(edit, [.. read, "Edit(./database/**)"], "Writes database/. Runs nothing."),
             AgentRole.Backend => new(editAndRun, [.. read, .. shell, "Edit(./backend/**)", .. Delete("backend"), "Bash(dotnet:*)"],
@@ -77,6 +72,13 @@ public static class Team
                 [.. read, .. shell, "Edit(./tests/**)", "Edit(./frontend/src/**/*.test.ts)", "Edit(./frontend/src/**/*.test.tsx)", .. Delete("tests"),
                  "Bash(dotnet:*)", "Bash(npm:*)", "Bash(npx:*)"],
                 "Writes tests/ and frontend *.test.ts(x) files. Runs dotnet, npm and npx."),
+            // Resolves merge conflicts in the main workspace, so it may edit every part of the code. Git commits are the board's job.
+            AgentRole.Integrator => new(editAndRun,
+                [.. read, .. shell, "Edit(./database/**)", "Edit(./backend/**)", "Edit(./frontend/**)", "Edit(./tests/**)",
+                 "Edit(./infra/**)", "Edit(./docs/**)", "Edit(./azure-pipelines.yml)", "Edit(./README.md)",
+                 "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git add:*)",
+                 "Bash(dotnet:*)", "Bash(npm:*)", "Bash(npx:*)"],
+                "Resolves merge conflicts anywhere in the code. Runs git status/diff/log/show/add, dotnet, npm and npx."),
             AgentRole.DevOps => deployEnabled
                 ? new(editAndRun,
                     [.. read, .. shell, "Edit(./infra/**)", "Edit(./azure-pipelines.yml)", .. Delete("infra"), "Bash(az bicep:*)", "Bash(az version:*)", "Bash(az account show:*)",
@@ -91,6 +93,39 @@ public static class Team
 
     public static List<TeamAgent> CreateDefaultTeam() =>
     [
+        new()
+        {
+            Role = AgentRole.Orchestrator,
+            Name = "Orchestrator",
+            Model = "opus",
+            Instructions = """
+                You are the delivery lead of the team. Plan the order in which the backlog's features are built.
+                Several features are built at the same time, each on its own git branch by its own copy of the team, and
+                each is merged into main when its tests pass. A feature starts on a branch made from main at that moment,
+                so it only sees the code of features that were already merged.
+
+                For every feature in the backlog decide which other features must be merged before it can start:
+                - Depend on a feature when you need its tables, endpoints, pages or behaviour (for example "edit a task"
+                  needs "create tasks"; "login" is needed by features that only signed-in users can use).
+                - Also make one feature wait for another when both would heavily rewrite the same screens, endpoints or
+                  tables, because building them in parallel would end in painful merge conflicts.
+                - Otherwise prefer parallel work: independent features should not depend on each other.
+                - Never create cycles. Features that are already done can be depended on; they count as available.
+
+                Look at the existing code in the workspace first to see what is already there.
+
+                Reply with a short explanation of the plan (which features run in parallel, in which order and why), then
+                a JSON block in exactly this shape, with one entry per backlog feature:
+                ```json
+                {
+                  "summary": "one or two sentences about the plan",
+                  "features": [
+                    { "number": 3, "dependsOn": [1], "reason": "Needs the task list API from #1." }
+                  ]
+                }
+                ```
+                """
+        },
         new()
         {
             Role = AgentRole.Planner,
@@ -147,8 +182,11 @@ public static class Team
                   the plan and do not add EF migrations. Register the DbContext in one place so tests can replace it.
                 - End Program.cs with `public partial class Program { }` so tests can use WebApplicationFactory.
                 - Validate input and return the status codes from the contract. Allow CORS from http://localhost:5173.
+                  The API listens on http://localhost:5000 in development (launchSettings.json).
                 - Run `dotnet build backend/Backend.slnx` and fix every error and warning you introduced.
                 - Never run `dotnet run` or `dotnet watch`: they do not exit.
+                - In the integration stage you talk with the Frontend developer: tell them exactly what the API does,
+                  and fix what they find wrong on your side.
 
                 Reply with the files you changed, the endpoints you implemented and anything the tests should know.
                 """
@@ -162,8 +200,12 @@ public static class Team
                 Implement the Frontend section of the plan in React + TypeScript + Vite in `frontend/`.
                 - If `frontend/` is empty, scaffold it non-interactively:
                   `npm create vite@latest frontend -- --template react-ts --no-interactive`, then `npm install --prefix frontend`.
-                - Call the API exactly as the contract says, through one small API module. Base URL:
-                  `import.meta.env.VITE_API_BASE_URL ?? '/api'`, and add a Vite dev proxy from /api to http://localhost:5000.
+                  If `frontend/package.json` exists but `frontend/node_modules` doesn't, run `npm install --prefix frontend`.
+                - The backend is built at the same time as you, so develop against the API contract: one small typed API
+                  module that calls the contract's routes (base URL `import.meta.env.VITE_API_BASE_URL ?? '/api'`, Vite dev
+                  proxy from /api to http://localhost:5000), plus mock data in `src/api/mocks/` used when
+                  `import.meta.env.VITE_USE_MOCKS === 'true'`, so the UI can be built and tried before the API exists.
+                - In the integration stage you talk with the Backend developer and switch the app onto the real API.
                 - Make it look clean and work well: loading, empty and error states, form validation, accessible labels.
                 - Set up Vitest + @testing-library/react + jsdom with a `test` script (`vitest run`) so the Testing agent
                   can add `*.test.tsx` files.
@@ -185,7 +227,9 @@ public static class Team
                   SQLite provider in place of SQL Server. Cover every endpoint: success, validation and not-found cases.
                   Run `dotnet test backend/Backend.slnx`.
                 - Frontend: write Vitest + Testing Library tests as `frontend/src/**/*.test.tsx`, mocking fetch.
-                  Run `npm test --prefix frontend`.
+                  Run `npm test --prefix frontend` (run `npm install --prefix frontend` first if node_modules is missing).
+                - Integration: check that the frontend's API module calls exactly the routes and payloads the backend
+                  implements (not only the mocks).
                 - Database: review the scripts against the plan (names, types, keys, idempotency).
                 - Do not change application code: report problems for the developers to fix.
 
@@ -193,6 +237,26 @@ public static class Team
                 error and the likely cause and file. End your reply with exactly these two lines:
                 VERDICT: PASS or VERDICT: FAIL
                 FIX: the areas that must change, comma-separated, from database, backend, frontend (or none)
+                """
+        },
+        new()
+        {
+            Role = AgentRole.Integrator,
+            Name = "Release engineer",
+            Model = "sonnet",
+            Instructions = """
+                Features are built in parallel on their own branches. You are called when merging a feature into main
+                produced git merge conflicts. The conflicted files are listed in your task.
+                - Resolve every conflict so that BOTH sides work: keep main's features and add this feature's changes.
+                  Never just pick one side when both added something (routes, registrations, menu items, tests).
+                - Remove every conflict marker (<<<<<<<, =======, >>>>>>>). Database migrations must keep unique,
+                  increasing numbers: renumber this feature's new script if both sides added the same number.
+                - Then build: `dotnet build backend/Backend.slnx` and `npm run build --prefix frontend` (run
+                  `npm install --prefix frontend` first if node_modules is missing), and run the tests if they exist.
+                  Fix what the merge broke.
+                - Stage the resolved files with `git add`. Do not commit: the board commits the merge.
+
+                Reply with how you resolved each file and the build and test results.
                 """
         },
         new()

@@ -4,31 +4,49 @@ An ASP.NET Core MVC app where you **sign in with your Claude account** and run *
 [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). Each agent has its own prompt, model and
 attached reference files.
 
-It also has **feature boards**: an Azure Boards style Kanban board where you add a feature as a prompt, and a team of
-Claude agents plans it, writes the SQL scripts, the .NET API and the React UI in parallel, tests it, and prepares or
-runs the Azure deployment.
+It also has **feature boards**: an Azure Boards style Kanban board where you add features as prompts. An orchestrator
+agent decides which features depend on which and starts the independent ones **in parallel**, each on its own git
+branch, the way a real team works: a planner writes the API contract, the database, backend (.NET) and frontend
+(React) developers build at the same time, backend and frontend then integrate, a tester tests, the branch is merged
+into main, and DevOps prepares or runs the Azure deployment.
 
 ## Feature boards
 
-| Column | Agent | What it does | May write | May run |
-|---|---|---|---|---|
-| New | | Feature prompts waiting. Drag a card to Planning (or click Start) to start it. | | |
-| Planning | Planner (opus) | Technical plan: schema, API contract, UI, test plan. Saved to `docs/features/`. | nothing | nothing |
-| Development | Database, Backend, Frontend (sonnet) | Run **concurrently**: T-SQL migrations, ASP.NET Core Web API (.NET 10), React + TypeScript + Vite. | `database/`, `backend/`, `frontend/` | `dotnet`; `npm`, `npx`, `node` |
-| Testing | Tester (sonnet) | xUnit + WebApplicationFactory and Vitest tests, runs them, reviews the SQL. Ends with `VERDICT: PASS/FAIL` and `FIX: ...`; on FAIL the named developers fix and it retests (up to `Board:MaxTestRounds`). | `tests/`, `frontend/**/*.test.ts(x)` | `dotnet`, `npm`, `npx` |
-| Deploying | DevOps (sonnet) | `infra/main.bicep`, `infra/deploy.ps1`, `azure-pipelines.yml`, validated with `az bicep build`. Deploys only when turned on. | `infra/`, `azure-pipelines.yml` | `az bicep`; with deployment on, also `infra/deploy.ps1` and read-only `az` commands |
-| Done | | Built, tested and committed to the workspace's git repository. | | |
+### The orchestrator (whole board)
 
-- **Orchestration.** Each stage is a Microsoft Agent Framework workflow (`BuildSequential` for one agent,
-  `BuildConcurrent` for the three developers) of `ChatClientAgent`s on `ClaudeCodeChatClient`. `FeatureOrchestrator`
-  chains the stages and passes each agent the feature prompt, the plan, the developers' reports and the test report.
-- **Workspace.** Each board has a folder (default `%USERPROFILE%\ClaudeAgentBoards\<board>`) with the layout above.
-  Every agent can read all of it but write only its own part (Claude Code permission rules such as `Edit(./backend/**)`);
-  anything else is refused, since nobody can approve a prompt. Features of one board run one at a time (the others are
-  queued) because they share the folder. The workspace is a git repository and each finished feature is committed.
-- **Live.** The board updates over server-sent events; the feature page (an Azure-style work item form) streams every
-  agent's output, tool use and token usage, and lists the child tasks, including fix and retest rounds.
-- **Team.** Each board's Settings page has the six agents' names, models and prompts, which you can change per board.
+Add features to **New**, then **Start autopilot** (or **Plan backlog** to only plan). The **Orchestrator** agent (opus)
+reads the backlog and the code and decides each feature's dependencies: a feature waits for the features whose tables,
+endpoints or pages it needs, and for features that would rewrite the same screens (to avoid painful merges); the rest
+run in parallel. Its reasoning is a run you can read, and every card shows "after #1" / "Waiting for #1".
+
+With autopilot on, the board starts every planned feature whose dependencies are merged, up to **Features in parallel**
+(per board, default 3). When a feature finishes, the next ready ones start; new or edited features are planned again.
+
+### One feature (its own branch)
+
+| Column | Agents | What happens | May write | May run |
+|---|---|---|---|---|
+| Planning | Planner | Technical plan and binding API contract, saved to `docs/features/`. | nothing | nothing |
+| Development | Database, Backend, Frontend | **Concurrently**: T-SQL migrations, ASP.NET Core Web API (.NET 10), React + TypeScript + Vite. The UI is built against the contract with mocks. | `database/`, `backend/`, `frontend/` | `dotnet`; `npm`, `npx`, `node` |
+| Integration | Backend + Frontend | A **group chat**: the backend developer describes the real API, the frontend developer switches the UI onto it, and they fix mismatches until both say `INTEGRATION: DONE` (up to `Board:MaxIntegrationTurns` messages). | own folders | as above |
+| Testing | Tester | xUnit + WebApplicationFactory and Vitest tests, contract check, SQL review. Ends with `VERDICT` and `FIX`; on FAIL the named developers fix and it retests (up to `Board:MaxTestRounds`). | `tests/`, `frontend/**/*.test.ts(x)` | `dotnet`, `npm`, `npx` |
+| Merging | Release engineer | The branch is merged into main, **one feature at a time**. On conflicts the release engineer resolves them so both sides work, builds and tests; unresolved conflicts undo the merge and keep the branch for a retry. | all code folders (in main) | `git status/diff/log/show/add`, `dotnet`, `npm`, `npx` |
+| Deploying | DevOps | On main: `infra/main.bicep`, `infra/deploy.ps1`, `azure-pipelines.yml`, validated with `az bicep build`. Deploys only when turned on. | `infra/`, `azure-pipelines.yml` | `az bicep`; with deployment on, `infra/deploy.ps1` and read-only `az` commands |
+| Done | | Merged into main (and committed); the branch and worktree are removed. | | |
+
+- **Agent Framework.** Every stage is a Microsoft Agent Framework workflow of `ChatClientAgent`s on
+  `ClaudeCodeChatClient`: `BuildSequential` for one agent, `BuildConcurrent` for the three developers, and a group chat
+  with `RoundRobinGroupChatManager` for integration. `FeatureOrchestrator` chains the stages for one feature;
+  `BoardOrchestrator` plans the backlog and `FeatureManager` schedules features.
+- **Workspace and branches.** Each board has a main workspace (default `%USERPROFILE%\ClaudeAgentBoards\<board>`), a git
+  repository. Each feature gets a branch `feature/NNNN-title` in its own worktree next to it
+  (`<board>.worktrees\feature-NNNN`), so features in parallel never write the same files. A retried feature continues on
+  its branch. Every agent can read the whole workspace but write only its own part (Claude Code permission rules such as
+  `Edit(./backend/**)`); anything else is refused, since nobody can approve a prompt.
+- **Live.** The board, the orchestrator bar and the cards update over server-sent events; the feature page (an
+  Azure-style work item form) streams every agent's output, tool use and token usage, and lists the child tasks,
+  dependencies, branch, and fix, retest and merge steps.
+- **Team.** Each board's Settings page has the eight agents' names, models and prompts, which you can change per board.
 - **Sign in to Azure.** Like Claude: **Azure > Sign in to Azure** opens `az login` (the official Azure CLI) on this
   computer and the app never sees credentials. Choose the subscription, resource group and location in the board
   settings. Deployment is **off** by default; when you turn it on the DevOps agent runs `infra/deploy.ps1`, which
@@ -84,7 +102,8 @@ pipeline (analyst → writer → editor) with attached files, so you can run it 
 | `Board:WorkspacesFolder` | `%USERPROFILE%\ClaudeAgentBoards` | Where new boards' workspaces are created |
 | `Board:AgentTimeoutMinutes` | `40` | One board agent step is stopped after this long |
 | `Board:MaxTestRounds` | `2` | Test rounds before a feature fails (developers fix between rounds) |
-| `Board:CommitToGit` | `true` | Commit each finished feature in the workspace |
+| `Board:MaxIntegrationTurns` | `6` | Messages Backend and Frontend may exchange while integrating |
+| `Board:MaxParallelFeaturesLimit` | `6` | Highest "features in parallel" a board can choose |
 
 ## Security model
 
@@ -102,8 +121,9 @@ opens a console window on that computer. So this is a single-user app for your o
 src/ClaudeAgentPipelines.Web/
   Claude/       ClaudeCli (locate, auth status/login/logout), ClaudeAccountService, ClaudeCodeChatClient (IChatClient)
   Azure/        AzureCli (az account show/list, az login/logout), AzureAccountService
-  Board/        models, BoardStore (JSON files), Team (roles, prompts, permissions), FeatureOrchestrator (stages as
-                Agent Framework workflows), FeatureManager (start, queue, cancel), BoardNotifier (live board)
+  Board/        models, BoardStore (JSON files), Team (roles, prompts, permissions), BoardOrchestrator (backlog plan),
+                FeatureOrchestrator (one feature's stages as Agent Framework workflows), FeatureManager (parallel
+                slots, scheduling, merge lock), GitWorkspace (branches, worktrees, merges), BoardNotifier (live board)
   Pipelines/    models, PipelineStore (JSON files), PipelineRunner (Agent Framework workflow), RunManager, PipelineRun
   Controllers/  Account (sign in with Claude), Pipelines (agents, prompts, files), Runs (live view, SSE, cancel),
                 Boards (board, SSE, settings, team), Features (work items), Azure (sign in to Azure)

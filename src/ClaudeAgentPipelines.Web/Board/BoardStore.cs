@@ -29,8 +29,20 @@ public sealed class BoardStore
         return projects.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
-    public Task<Project?> GetProjectAsync(string? id, CancellationToken cancellationToken = default) =>
-        Ids.IsValid(id) ? ReadAsync<Project>(ProjectFile(id!), cancellationToken) : Task.FromResult<Project?>(null);
+    public async Task<Project?> GetProjectAsync(string? id, CancellationToken cancellationToken = default)
+    {
+        if (!Ids.IsValid(id)) return null;
+        var project = await ReadAsync<Project>(ProjectFile(id!), cancellationToken);
+        if (project is null) return null;
+
+        // Boards made before a role existed get its default agent, in team order.
+        var defaults = Team.CreateDefaultTeam();
+        if (defaults.Any(d => project.Team.All(a => a.Role != d.Role)))
+        {
+            project.Team = defaults.Select(d => project.Team.FirstOrDefault(a => a.Role == d.Role) ?? d).ToList();
+        }
+        return project;
+    }
 
     public async Task CreateProjectAsync(Project project, CancellationToken cancellationToken = default)
     {

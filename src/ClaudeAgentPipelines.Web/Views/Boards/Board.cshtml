@@ -5,12 +5,14 @@
     ViewData["Wide"] = true;
     var columns = new (FeatureStage Stage, string Description, AgentRole[] Roles)[]
     {
-        (FeatureStage.New, "Feature prompts waiting for the team. Drag a card to Planning to start it.", []),
-        (FeatureStage.Planning, "The Planner writes the technical plan: schema, API contract, UI and test plan.", [AgentRole.Planner]),
-        (FeatureStage.Development, "Database, Backend and Frontend agents build it in parallel.", [AgentRole.Database, AgentRole.Backend, AgentRole.Frontend]),
+        (FeatureStage.New, "The backlog. The orchestrator decides the order and starts features (autopilot), or drag a card to Planning to start it.", [AgentRole.Orchestrator]),
+        (FeatureStage.Planning, "On its own branch, the Planner writes the technical plan: schema, API contract, UI and test plan.", [AgentRole.Planner]),
+        (FeatureStage.Development, "Database, Backend and Frontend agents build it in parallel; the UI against the contract, with mocks.", [AgentRole.Database, AgentRole.Backend, AgentRole.Frontend]),
+        (FeatureStage.Integration, "Backend and Frontend talk to each other and switch the UI onto the real API.", [AgentRole.Backend, AgentRole.Frontend]),
         (FeatureStage.Testing, "The Tester runs the tests; developers fix what fails.", [AgentRole.Testing]),
-        (FeatureStage.Deploying, project.Azure.DeployEnabled ? "DevOps updates the Azure infrastructure and deploys." : "DevOps updates the Azure infrastructure and pipeline (deployment is off).", [AgentRole.DevOps]),
-        (FeatureStage.Done, "Built, tested and committed.", [])
+        (FeatureStage.Merging, "Merged into main one feature at a time, like a pull request. The release engineer resolves conflicts.", [AgentRole.Integrator]),
+        (FeatureStage.Deploying, project.Azure.DeployEnabled ? "DevOps updates the Azure infrastructure and deploys from main." : "DevOps updates the Azure infrastructure and pipeline on main (deployment is off).", [AgentRole.DevOps]),
+        (FeatureStage.Done, "Built, integrated, tested and merged into main.", [])
     };
 }
 
@@ -23,6 +25,31 @@
         <a class="pivot" asp-action="Settings" asp-route-id="@project.Id">Settings &amp; team</a>
     </nav>
 </div>
+
+<section class="orchestrator-bar" id="orchestrator" data-run-url="@Url.Action("Details", "Runs", new { id = "__id__" })">
+    <span class="avatar avatar-orchestrator">@Team.Initials(AgentRole.Orchestrator)</span>
+    <div class="orchestrator-text">
+        <strong>Orchestrator</strong>
+        <span data-role="status" class="muted small"></span>
+        <div data-role="summary" class="small"></div>
+    </div>
+    <form class="orchestrator-controls" asp-action="Autopilot" asp-route-id="@project.Id" method="post">
+        <label class="small" for="max-parallel">Features in parallel</label>
+        <select id="max-parallel" name="maxParallel">
+            @for (var i = 1; i <= Math.Max(1, Model.MaxParallelLimit); i++)
+            {
+                <option value="@i" selected="@(i == project.MaxParallelFeatures)">@i</option>
+            }
+        </select>
+        <input type="hidden" name="enabled" value="@((!project.Autopilot).ToString().ToLowerInvariant())" />
+        <button type="submit" class="btn @(project.Autopilot ? "btn-secondary" : "btn-azure")" data-role="autopilot">
+            @(project.Autopilot ? "⏸ Pause autopilot" : "▶ Start autopilot")
+        </button>
+    </form>
+    <form asp-action="Plan" asp-route-id="@project.Id" method="post">
+        <button type="submit" class="btn btn-secondary" title="Let the orchestrator decide dependencies and order for the backlog">Plan backlog</button>
+    </form>
+</section>
 
 <div class="board-toolbar">
     <button type="button" class="btn btn-azure" id="new-item">&#xFF0B; New item</button>
@@ -58,7 +85,7 @@
     }
 </div>
 
-<script type="application/json" id="board-data">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Cards, PipelineStore.Json).Replace("<", "\\u003c"))</script>
+<script type="application/json" id="board-data">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(new { cards = Model.Cards, orchestration = OrchestrationCard.From(project) }, PipelineStore.Json).Replace("<", "\\u003c"))</script>
 <form id="board-token">@Html.AntiForgeryToken()</form>
 
 <dialog id="new-feature" class="dialog">
@@ -72,7 +99,14 @@
         <label for="feature-prompt">Prompt <span class="muted">- describe the feature for the agent team</span></label>
         <textarea id="feature-prompt" name="Prompt" rows="10" required maxlength="20000"
                   placeholder="What should users be able to do? Which fields, rules and screens? Anything about the data, the API or how it should look."></textarea>
-        <label class="checkbox"><input type="checkbox" name="StartNow" value="true" checked /> Start the agent team now</label>
+        @if (project.Autopilot)
+        {
+            <p class="muted small">Autopilot is on: the orchestrator plans this feature with the rest of the backlog and starts it when its dependencies are done.</p>
+        }
+        else
+        {
+            <label class="checkbox"><input type="checkbox" name="StartNow" value="true" checked /> Start the agent team now</label>
+        }
         <div class="form-actions">
             <button type="submit" class="btn btn-azure">Save</button>
             <button type="button" class="btn btn-secondary" data-role="close">Cancel</button>

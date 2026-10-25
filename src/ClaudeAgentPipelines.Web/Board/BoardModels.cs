@@ -5,11 +5,11 @@ namespace ClaudeAgentPipelines.Board;
 
 /// <summary>The jobs on the agent team. Each role writes only to its own part of the workspace.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum AgentRole { Planner, Database, Backend, Frontend, Testing, DevOps }
+public enum AgentRole { Orchestrator, Planner, Database, Backend, Frontend, Testing, Integrator, DevOps }
 
 /// <summary>Board columns, left to right.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum FeatureStage { New, Planning, Development, Testing, Deploying, Done }
+public enum FeatureStage { New, Planning, Development, Integration, Testing, Merging, Deploying, Done }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum FeatureStatus { NotStarted, Queued, Running, Failed, Cancelled, Completed }
@@ -17,14 +17,18 @@ public enum FeatureStatus { NotStarted, Queued, Running, Failed, Cancelled, Comp
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum TaskState { ToDo, Doing, Done, Failed, Cancelled }
 
-/// <summary>A board: one workspace (code folder) that the agent team builds features in.</summary>
+/// <summary>What a child task is for: the same agent does different jobs in different stages.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TaskKind { Plan, Develop, Integrate, Test, Fix, Retest, Merge, Deploy }
+
+/// <summary>A board: one workspace (git repository) that the agent team builds features in.</summary>
 public sealed class Project
 {
     public string Id { get; set; } = Ids.New();
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>Absolute path of the folder the agents write code in.</summary>
+    /// <summary>Absolute path of the main workspace: the git repository features are merged into.</summary>
     public string WorkspacePath { get; set; } = string.Empty;
 
     /// <summary>Number given to the next feature, like work item IDs in Azure Boards.</summary>
@@ -32,12 +36,37 @@ public sealed class Project
 
     public ProjectAzureSettings Azure { get; set; } = new();
 
+    /// <summary>
+    /// Autopilot: the orchestrator plans the backlog whenever it changes and starts every feature whose dependencies
+    /// are done, up to <see cref="MaxParallelFeatures"/> at a time.
+    /// </summary>
+    public bool Autopilot { get; set; }
+
+    /// <summary>Features built at the same time, each on its own branch and worktree.</summary>
+    public int MaxParallelFeatures { get; set; } = 3;
+
+    public OrchestrationState Orchestration { get; set; } = new();
+
     /// <summary>One agent per role; prompts and models can be changed per project.</summary>
     public List<TeamAgent> Team { get; set; } = [];
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    public TeamAgent Agent(AgentRole role) => Team.First(a => a.Role == role);
+    public TeamAgent Agent(AgentRole role) =>
+        Team.FirstOrDefault(a => a.Role == role) ?? Board.Team.CreateDefaultTeam().First(a => a.Role == role);
+}
+
+/// <summary>The orchestrator's last backlog plan.</summary>
+public sealed class OrchestrationState
+{
+    public bool Planning { get; set; }
+    public string? RunId { get; set; }
+    public DateTimeOffset? PlannedAt { get; set; }
+
+    /// <summary>The orchestrator's summary of the plan: what runs in parallel and why.</summary>
+    public string? Summary { get; set; }
+
+    public string? Error { get; set; }
 }
 
 public sealed class ProjectAzureSettings
@@ -62,7 +91,7 @@ public sealed class TeamAgent
     public string Instructions { get; set; } = string.Empty;
 }
 
-/// <summary>A work item on the board: a feature the agent team plans, builds, tests and deploys.</summary>
+/// <summary>A work item on the board: a feature the agent team plans, builds, integrates, tests, merges and deploys.</summary>
 public sealed class Feature
 {
     public string Id { get; set; } = Ids.New();
@@ -77,10 +106,23 @@ public sealed class Feature
     public FeatureStatus Status { get; set; } = FeatureStatus.NotStarted;
     public string? Error { get; set; }
 
+    /// <summary>Numbers of the features that must be done (merged) before this one starts, decided by the orchestrator.</summary>
+    public List<int> DependsOn { get; set; } = [];
+
+    /// <summary>The orchestrator's reason for the dependencies (or for none).</summary>
+    public string? OrchestratorNote { get; set; }
+
+    /// <summary>When the orchestrator last planned this feature. Autopilot only starts planned features.</summary>
+    public DateTimeOffset? PlannedAt { get; set; }
+
     public List<FeatureTask> Tasks { get; set; } = [];
 
     public string? CurrentRunId { get; set; }
     public List<string> RunIds { get; set; } = [];
+
+    /// <summary>Git branch and worktree the feature is built in, until it is merged.</summary>
+    public string? Branch { get; set; }
+    public string? WorktreePath { get; set; }
 
     /// <summary>Workspace-relative path of the planner's technical plan.</summary>
     public string? PlanPath { get; set; }
@@ -101,6 +143,7 @@ public sealed class FeatureTask
 {
     public string StepId { get; set; } = Ids.New();
     public AgentRole Role { get; set; }
+    public TaskKind Kind { get; set; }
     public string Title { get; set; } = string.Empty;
     public int Round { get; set; } = 1;
     public TaskState State { get; set; } = TaskState.ToDo;

@@ -74,8 +74,11 @@ public sealed class BoardOptions
     /// <summary>How many times the testing agent runs; after a failed round the developers fix what it reported.</summary>
     public int MaxTestRounds { get; set; } = 2;
 
-    /// <summary>Commit each finished feature to the workspace's git repository.</summary>
-    public bool CommitToGit { get; set; } = true;
+    /// <summary>Most messages Backend and Frontend exchange while integrating a feature.</summary>
+    public int MaxIntegrationTurns { get; set; } = 6;
+
+    /// <summary>Upper limit for a board's "features in parallel" setting.</summary>
+    public int MaxParallelFeaturesLimit { get; set; } = 6;
 
     public string EffectiveWorkspacesFolder => !string.IsNullOrWhiteSpace(WorkspacesFolder)
         ? Path.GetFullPath(WorkspacesFolder)

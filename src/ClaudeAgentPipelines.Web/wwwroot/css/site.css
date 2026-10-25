@@ -290,8 +290,8 @@ code { font-family: var(--mono); font-size: .9em; }
 
 .kanban { display: flex; gap: .5rem; overflow-x: auto; align-items: stretch; min-height: 70vh; padding-bottom: .5rem; }
 .kanban-column {
-    flex: 1 0 200px;
-    max-width: 340px;
+    flex: 1 0 175px;
+    max-width: 320px;
     display: flex;
     flex-direction: column;
     background: var(--column-bg);
@@ -365,6 +365,34 @@ code { font-family: var(--mono); font-size: .9em; }
 .wi-card-foot .btn-link { margin-left: auto; color: var(--azure-blue); }
 .wi-assigned { display: flex; gap: 2px; align-items: center; }
 .wi-error { color: var(--error); margin-top: .35rem; overflow-wrap: anywhere; }
+.wi-tag-blocked { background: rgba(202, 80, 16, .1); color: #ca5010; border-color: transparent; }
+.wi-branch { font-family: var(--mono); font-size: .72rem; color: var(--muted); overflow-wrap: anywhere; }
+
+.orchestrator-bar {
+    display: flex;
+    align-items: center;
+    gap: .9rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid #3b3a39;
+    border-radius: 2px;
+    padding: .6rem .9rem;
+    margin-bottom: .75rem;
+}
+.orchestrator-bar.planning { border-left-color: var(--running); }
+.orchestrator-bar.planning .avatar { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--running); }
+.orchestrator-text { flex: 1; min-width: 0; }
+.orchestrator-text strong { margin-right: .5rem; }
+.orchestrator-controls { display: flex; align-items: center; gap: .5rem; }
+.orchestrator-bar form { margin: 0; }
+.orchestrator-bar select {
+    padding: .35rem .4rem;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
 
 .avatar {
     display: inline-flex;
@@ -380,6 +408,8 @@ code { font-family: var(--mono); font-size: .9em; }
     background: #8a8886;
     letter-spacing: .02em;
 }
+.avatar-orchestrator { background: #3b3a39; }
+.avatar-integrator { background: #c239b3; }
 .avatar-planner { background: #8764b8; }
 .avatar-database { background: #ca5010; }
 .avatar-backend { background: #0078d4; }
@@ -448,7 +478,9 @@ code { font-family: var(--mono); font-size: .9em; }
 .wi-state::before { content: ""; width: .6rem; height: .6rem; border-radius: 50%; background: #b2b2b2; }
 .wi-state-planning::before { background: #8764b8; }
 .wi-state-development::before { background: #0078d4; }
+.wi-state-integration::before { background: #038387; }
 .wi-state-testing::before { background: #498205; }
+.wi-state-merging::before { background: #c239b3; }
 .wi-state-deploying::before { background: #4f6bed; }
 .wi-state-done::before { background: var(--ok); }
 .wi-form-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }

@@ -6,7 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace ClaudeAgentPipelines.Controllers;
 
 /// <summary>Feature work items: create from a prompt, start the agent team, follow it live, cancel.</summary>
-public sealed class FeaturesController(BoardStore store, FeatureManager features, RunManager runs) : Controller
+public sealed class FeaturesController(BoardStore store, FeatureManager features, BoardOrchestrator orchestrator, RunManager runs)
+    : Controller
 {
     [HttpPost]
     public async Task<IActionResult> Create(string projectId, FeatureForm form, CancellationToken cancellationToken)
@@ -27,7 +28,14 @@ public sealed class FeaturesController(BoardStore store, FeatureManager features
 
         features.BoardChanged(projectId);
 
-        if (form.StartNow)
+        var project = await store.GetProjectAsync(projectId, cancellationToken);
+        if (project is { Autopilot: true })
+        {
+            // The orchestrator decides when it starts.
+            var planError = await orchestrator.PlanAsync(projectId, "Orchestrator", cancellationToken);
+            if (planError is not null) TempData["Error"] = planError;
+        }
+        else if (form.StartNow)
         {
             var error = await features.StartAsync(projectId, feature.Id, User.Identity?.Name ?? "unknown", cancellationToken);
             if (error is not null) TempData["Error"] = error;
@@ -47,7 +55,9 @@ public sealed class FeaturesController(BoardStore store, FeatureManager features
         {
             if (await runs.GetAsync(previous, cancellationToken) is { } past) history.Add(past);
         }
-        return View(new FeatureDetailsViewModel(project, feature, run, history));
+        var all = await store.ListFeaturesAsync(projectId, cancellationToken);
+        var dependencies = all.Where(f => feature.DependsOn.Contains(f.Number)).ToList();
+        return View(new FeatureDetailsViewModel(project, feature, run, history, dependencies, FeatureManager.BlockedBy(feature, all)));
     }
 
     [HttpPost]
@@ -71,8 +81,14 @@ public sealed class FeaturesController(BoardStore store, FeatureManager features
         {
             f.Title = form.Title.Trim();
             f.Prompt = form.Prompt.Trim();
+            f.PlannedAt = null; // The orchestrator's dependencies may no longer fit.
         }, cancellationToken);
         TempData["Message"] = "Feature saved.";
+        if ((await store.GetProjectAsync(projectId, cancellationToken)) is { Autopilot: true })
+        {
+            await orchestrator.PlanAsync(projectId, "Orchestrator", cancellationToken);
+            TempData["Message"] = "Feature saved. The orchestrator is planning the backlog again.";
+        }
         return RedirectToAction(nameof(Details), new { projectId, id });
     }
 
@@ -102,16 +118,18 @@ public sealed class FeaturesController(BoardStore store, FeatureManager features
     [HttpPost]
     public async Task<IActionResult> Delete(string projectId, string id, CancellationToken cancellationToken)
     {
+        var project = await store.GetProjectAsync(projectId, cancellationToken);
         var feature = await store.GetFeatureAsync(projectId, id, cancellationToken);
-        if (feature is null) return NotFound();
+        if (project is null || feature is null) return NotFound();
         if (feature.IsActive)
         {
             TempData["Error"] = "Cancel the feature before deleting it.";
             return RedirectToAction(nameof(Details), new { projectId, id });
         }
 
-        await store.DeleteFeatureAsync(projectId, id, cancellationToken);
-        features.BoardChanged(projectId);
+        await features.DeleteAsync(project, feature, cancellationToken);
+        // Features that waited for it may be ready now.
+        await features.ScheduleAsync(projectId, cancellationToken);
         TempData["Message"] = $"Feature #{feature.Number} deleted. The code the agents wrote stays in the workspace.";
         return RedirectToAction("Board", "Boards", new { id = projectId });
     }

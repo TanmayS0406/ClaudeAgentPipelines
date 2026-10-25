@@ -14,6 +14,8 @@ public sealed partial class BoardsController(
     BoardStore store,
     BoardNotifier notifier,
     RunManager runs,
+    FeatureManager features,
+    BoardOrchestrator orchestrator,
     PipelineStore pipelines,
     IWebHostEnvironment environment,
     IOptionsMonitor<BoardOptions> boardOptions,
@@ -64,7 +66,8 @@ public sealed partial class BoardsController(
         if (project is null) return NotFound();
 
         var version = notifier.Version(project.Id);
-        return View(new BoardViewModel(project, await CardsAsync(project.Id, cancellationToken), version));
+        return View(new BoardViewModel(project, await CardsAsync(project.Id, cancellationToken), version,
+            boardOptions.CurrentValue.MaxParallelFeaturesLimit));
     }
 
     /// <summary>Server-sent events: the board's cards, each time a feature on it changes.</summary>
@@ -74,6 +77,47 @@ public sealed partial class BoardsController(
         var project = await store.GetProjectAsync(id, cancellationToken);
         if (project is null) return Results.NotFound();
         return TypedResults.ServerSentEvents(StreamBoard(project.Id, version, cancellationToken));
+    }
+
+    /// <summary>Turns autopilot on or off and sets how many features are built in parallel.</summary>
+    [HttpPost]
+    public async Task<IActionResult> Autopilot(string id, bool enabled, int maxParallel, CancellationToken cancellationToken)
+    {
+        var limit = Math.Max(1, boardOptions.CurrentValue.MaxParallelFeaturesLimit);
+        var project = await store.UpdateProjectAsync(id, p =>
+        {
+            p.Autopilot = enabled;
+            if (maxParallel > 0) p.MaxParallelFeatures = Math.Clamp(maxParallel, 1, limit);
+        }, cancellationToken);
+        if (project is null) return NotFound();
+        features.BoardChanged(id);
+
+        if (enabled)
+        {
+            // Plan what is not planned yet; when everything is, just start what is ready.
+            var backlog = await store.ListFeaturesAsync(id, cancellationToken);
+            if (backlog.Any(f => f.Status == FeatureStatus.NotStarted && f.PlannedAt is null))
+            {
+                if (await orchestrator.PlanAsync(id, User.Identity?.Name ?? "unknown", cancellationToken) is { } error) TempData["Error"] = error;
+            }
+            else
+            {
+                await features.ScheduleAsync(id, cancellationToken);
+            }
+        }
+        TempData["Message"] = enabled
+            ? $"Autopilot on: the orchestrator starts ready features, up to {project.MaxParallelFeatures} in parallel."
+            : "Autopilot off: features in progress continue, but no new ones start by themselves.";
+        return RedirectToAction(nameof(Board), new { id });
+    }
+
+    /// <summary>Asks the orchestrator to plan the backlog now.</summary>
+    [HttpPost]
+    public async Task<IActionResult> Plan(string id, CancellationToken cancellationToken)
+    {
+        var error = await orchestrator.PlanAsync(id, User.Identity?.Name ?? "unknown", cancellationToken);
+        if (error is not null) TempData["Error"] = error;
+        return RedirectToAction(nameof(Board), new { id });
     }
 
     [HttpGet]
@@ -151,8 +195,9 @@ public sealed partial class BoardsController(
         var defaults = Team.CreateDefaultTeam().First(a => a.Role == role);
         var project = await store.UpdateProjectAsync(id, p =>
         {
-            p.Team.RemoveAll(a => a.Role == role);
-            p.Team.Insert(Math.Min((int)role, p.Team.Count), defaults);
+            var index = p.Team.FindIndex(a => a.Role == role);
+            if (index >= 0) p.Team[index] = defaults;
+            else p.Team.Add(defaults);
         }, cancellationToken);
         if (project is null) return NotFound();
 
@@ -192,17 +237,20 @@ public sealed partial class BoardsController(
 
             version = notifier.Version(projectId);
             var cards = await CardsAsync(projectId, cancellationToken);
-            yield return new SseItem<object>(new { version, cards }, "board");
+            var project = await store.GetProjectAsync(projectId, cancellationToken);
+            if (project is null) yield break;
+            yield return new SseItem<object>(new { version, cards, orchestration = OrchestrationCard.From(project) }, "board");
         }
     }
 
     private async Task<IReadOnlyList<FeatureCard>> CardsAsync(string projectId, CancellationToken cancellationToken)
     {
         var cards = new List<FeatureCard>();
-        foreach (var feature in await store.ListFeaturesAsync(projectId, cancellationToken))
+        var all = await store.ListFeaturesAsync(projectId, cancellationToken);
+        foreach (var feature in all)
         {
             var run = feature is { IsActive: true, CurrentRunId: { } runId } ? await runs.GetAsync(runId, cancellationToken) : null;
-            cards.Add(FeatureCard.From(feature, run?.Stage));
+            cards.Add(FeatureCard.From(feature, run?.Stage, FeatureManager.BlockedBy(feature, all)));
         }
         return cards;
     }

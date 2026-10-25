@@ -12,9 +12,14 @@ namespace ClaudeAgentPipelines.Pipelines;
 /// </summary>
 public static class AgentWorkflowExecution
 {
+    /// <param name="conversation">
+    /// A group chat, where agents take several turns: steps complete when the workflow ends, and each new turn in a step's
+    /// output is marked.
+    /// </param>
     public static async Task RunAsync(Workflow workflow, string input, PipelineRun run, IReadOnlyCollection<string> agentIds,
-                                      CancellationToken cancellationToken)
+                                      CancellationToken cancellationToken, bool conversation = false)
     {
+        string? lastSpeaker = null;
         await using var execution = await InProcessExecution.RunStreamingAsync(
             workflow, new List<ChatMessage> { new(ChatRole.User, input) }, cancellationToken: cancellationToken);
         await execution.TrySendMessageAsync(new TurnToken(emitEvents: true));
@@ -30,10 +35,18 @@ public static class AgentWorkflowExecution
                     break;
 
                 case AgentResponseUpdateEvent { Update: var update }:
+                    if (conversation && update.AgentId is { } speaker && agentIds.Contains(speaker) && !string.IsNullOrEmpty(update.Text))
+                    {
+                        if (lastSpeaker is not null && lastSpeaker != speaker && run.StepOutput(speaker).Length > 0)
+                        {
+                            run.StepText(speaker, "\n\n----- next turn -----\n\n");
+                        }
+                        lastSpeaker = speaker;
+                    }
                     HandleUpdate(agentIds, run, update);
                     break;
 
-                case ExecutorCompletedEvent completed when FindAgentId(agentIds, completed.ExecutorId) is { } agentId:
+                case ExecutorCompletedEvent completed when !conversation && FindAgentId(agentIds, completed.ExecutorId) is { } agentId:
                     run.StepCompleted(agentId);
                     break;
 

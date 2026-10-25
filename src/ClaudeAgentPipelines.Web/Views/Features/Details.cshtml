@@ -131,6 +131,33 @@
             </section>
 
             <section class="card">
+                <h2>Dependencies</h2>
+                @if (feature.PlannedAt is null)
+                {
+                    <p class="muted small">Not planned by the orchestrator yet.</p>
+                }
+                else if (Model.Dependencies.Count == 0)
+                {
+                    <p class="muted small">None: can be built in parallel with other features.</p>
+                }
+                <ul class="task-list">
+                    @foreach (var dependency in Model.Dependencies)
+                    {
+                        var blocked = Model.BlockedBy.Contains(dependency.Number);
+                        <li data-state="@(blocked ? "pending" : "completed")">
+                            <span class="task-icon"></span>
+                            <a class="task-title" asp-action="Details" asp-route-projectId="@project.Id" asp-route-id="@dependency.Id">#@dependency.Number @dependency.Title</a>
+                            <span class="task-state">@(blocked ? "Not done" : "Done")</span>
+                        </li>
+                    }
+                </ul>
+                @if (!string.IsNullOrWhiteSpace(feature.OrchestratorNote))
+                {
+                    <p class="small"><span class="muted">Orchestrator:</span> @feature.OrchestratorNote</p>
+                }
+            </section>
+
+            <section class="card">
                 <h2>Deployment</h2>
                 @if (feature.DeploymentUrl is not null)
                 {
@@ -150,6 +177,11 @@
             <section class="card">
                 <h2>Workspace</h2>
                 <p class="small wi-path" title="@project.WorkspacePath">@project.WorkspacePath</p>
+                @if (feature.Branch is not null)
+                {
+                    <p class="small">Branch: <code>@feature.Branch</code></p>
+                    <p class="small wi-path muted" title="Worktree">@feature.WorktreePath</p>
+                }
                 @if (feature.PlanPath is not null)
                 {
                     <p class="small">Technical plan: <code>@feature.PlanPath</code></p>

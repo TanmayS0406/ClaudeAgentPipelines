@@ -10,6 +10,10 @@
         {
             <a asp-controller="Features" asp-action="Details" asp-route-projectId="@Model.ProjectId" asp-route-id="@Model.FeatureId">@Model.PipelineName</a>
         }
+        else if (Model.ProjectId is not null)
+        {
+            <a asp-controller="Boards" asp-action="Board" asp-route-id="@Model.ProjectId">@Model.PipelineName</a>
+        }
         else
         {
             <a asp-controller="Pipelines" asp-action="Run" asp-route-id="@Model.PipelineId">@Model.PipelineName</a>
@@ -23,6 +27,10 @@
         @if (Model.FeatureId is not null)
         {
             <a class="btn btn-primary" asp-controller="Features" asp-action="Details" asp-route-projectId="@Model.ProjectId" asp-route-id="@Model.FeatureId">Open feature</a>
+        }
+        else if (Model.ProjectId is not null)
+        {
+            <a class="btn btn-primary" asp-controller="Boards" asp-action="Board" asp-route-id="@Model.ProjectId">Open board</a>
         }
         else
         {

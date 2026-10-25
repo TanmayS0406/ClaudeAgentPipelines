@@ -31,6 +31,7 @@ builder.Services.AddSingleton<BoardStore>();
 builder.Services.AddSingleton<BoardNotifier>();
 builder.Services.AddSingleton<FeatureOrchestrator>();
 builder.Services.AddSingleton<FeatureManager>();
+builder.Services.AddSingleton<BoardOrchestrator>();
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -94,6 +95,12 @@ app.MapControllerRoute(
     pattern: "{controller=Boards}/{action=Index}/{id?}");
 
 await app.Services.GetRequiredService<PipelineStore>().EnsureSamplePipelineAsync();
-await app.Services.GetRequiredService<FeatureManager>().RecoverAsync();
+var featureManager = app.Services.GetRequiredService<FeatureManager>();
+await featureManager.RecoverAsync();
+// Autopilot boards carry on with the features that are ready.
+foreach (var project in await app.Services.GetRequiredService<BoardStore>().ListProjectsAsync())
+{
+    if (project.Autopilot) await featureManager.ScheduleAsync(project.Id);
+}
 
 app.Run();
