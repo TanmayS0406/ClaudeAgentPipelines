@@ -5,7 +5,7 @@ using ClaudeAgentPipelines.Pipelines;
 
 namespace ClaudeAgentPipelines.Models;
 
-public sealed record LoginViewModel(ClaudeAuthStatus Status, bool LoginInProgress, string ReturnUrl);
+public sealed record ClaudeViewModel(ClaudeAuthStatus Status, bool LoginInProgress);
 
 public sealed class PipelineForm
 {

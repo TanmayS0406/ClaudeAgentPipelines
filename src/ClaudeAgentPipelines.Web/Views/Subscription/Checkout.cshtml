@@ -1,0 +1,30 @@
+@model CheckoutViewModel
+@{
+    ViewData["Title"] = "Payment";
+    var payment = Model.Payment;
+}
+
+<section class="card login-card">
+    <h1>Pay @Money.Format(payment.Amount)</h1>
+    <p class="muted">
+        @payment.Days day@(payment.Days == 1 ? "" : "s") for @payment.Users user@(payment.Users == 1 ? "" : "s")
+        at @Money.Format(payment.Amount / payment.Days / payment.Users) per user per day.
+    </p>
+
+    <p id="checkout-progress" class="login-progress"><span class="spinner"></span> Opening Cashfree...</p>
+    <div id="checkout"
+         data-session="@payment.PaymentSessionId"
+         data-mode="@Model.Mode"
+         data-return-url="@Url.Action("Return", new { order_id = payment.CashfreeOrderId })"></div>
+
+    <div class="login-actions">
+        <button type="button" id="open-checkout" class="btn btn-primary btn-large">Open payment page</button>
+        <a class="btn btn-secondary" asp-action="Return" asp-route-order_id="@payment.CashfreeOrderId">I have paid - check now</a>
+    </div>
+    <p class="muted">Did the page not open? Allow pop-ups for this site, or click the button above.</p>
+</section>
+
+@section Scripts {
+    <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+    <script src="~/js/checkout.js" asp-append-version="true"></script>
+}

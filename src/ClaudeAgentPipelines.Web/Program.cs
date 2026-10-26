@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ClaudeAgentPipelines;
 using ClaudeAgentPipelines.Azure;
+using ClaudeAgentPipelines.Billing;
 using ClaudeAgentPipelines.Board;
 using ClaudeAgentPipelines.Claude;
 using ClaudeAgentPipelines.Data;
@@ -9,6 +10,7 @@ using ClaudeAgentPipelines.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +22,8 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(Stor
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.Section));
 builder.Services.Configure<AzureOptions>(builder.Configuration.GetSection(AzureOptions.Section));
 builder.Services.Configure<BoardOptions>(builder.Configuration.GetSection(BoardOptions.Section));
+builder.Services.Configure<BillingOptions>(builder.Configuration.GetSection(BillingOptions.Section));
+builder.Services.Configure<CashfreeOptions>(builder.Configuration.GetSection(CashfreeOptions.Section));
 
 var storage = builder.Configuration.GetSection(StorageOptions.Section).Get<StorageOptions>() ?? new StorageOptions();
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
@@ -40,6 +44,13 @@ builder.Services.AddSingleton<FeatureOrchestrator>();
 builder.Services.AddSingleton<FeatureManager>();
 builder.Services.AddSingleton<BoardOrchestrator>();
 
+builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
+builder.Services.AddHttpClient(CashfreeClient.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<CashfreeClient>();
+builder.Services.AddSingleton<UserService>();
+builder.Services.AddSingleton<BillingService>();
+builder.Services.AddHostedService<BillingWorker>();
+
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -48,17 +59,17 @@ builder.Services
         options.LogoutPath = "/Account/Logout";
         options.Cookie.Name = "ClaudeAgentPipelines.Auth";
         options.Cookie.HttpOnly = true;
-        options.Cookie.SameSite = SameSiteMode.Strict;
+        // Lax, not Strict: Cashfree sends the customer back from its own site, and that visit must stay signed in.
+        options.Cookie.SameSite = SameSiteMode.Lax;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
 
-        // The app session is only valid while Claude Code on this computer is still signed in to the same account.
+        // A user who was removed or disabled is signed out on their next request.
         options.Events.OnValidatePrincipal = async context =>
         {
-            var account = context.HttpContext.RequestServices.GetRequiredService<ClaudeAccountService>();
-            var status = await account.GetStatusAsync(cancellationToken: context.HttpContext.RequestAborted);
-            var signedInAs = context.Principal?.FindFirstValue(ClaudeAccountService.AccountClaim);
-            if (!status.LoggedIn || !string.Equals(status.Account, signedInAs, StringComparison.OrdinalIgnoreCase))
+            var users = context.HttpContext.RequestServices.GetRequiredService<UserService>();
+            var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!await users.IsActiveAsync(userId, context.HttpContext.RequestAborted))
             {
                 context.RejectPrincipal();
                 await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -70,6 +81,7 @@ builder.Services.AddControllersWithViews(options =>
 {
     options.Filters.Add(new AuthorizeFilter());
     options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute());
+    options.Filters.Add<RequireSubscriptionFilter>();
 });
 
 builder.Services.Configure<FormOptions>(options =>
@@ -103,6 +115,7 @@ app.MapControllerRoute(
 await DatabaseInitializer.InitializeAsync(
     app.Services.GetRequiredService<IDbContextFactory<AppDbContext>>(), storage, app.Environment.ContentRootPath,
     app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Database"));
+await app.Services.GetRequiredService<UserService>().EnsureSeedUserAsync();
 await app.Services.GetRequiredService<PipelineStore>().EnsureSamplePipelineAsync();
 var featureManager = app.Services.GetRequiredService<FeatureManager>();
 await featureManager.RecoverAsync();

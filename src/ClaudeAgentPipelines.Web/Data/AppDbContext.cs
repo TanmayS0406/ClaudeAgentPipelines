@@ -1,3 +1,4 @@
+using ClaudeAgentPipelines.Billing;
 using ClaudeAgentPipelines.Board;
 using ClaudeAgentPipelines.Pipelines;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PipelineRun> Runs => Set<PipelineRun>();
     public DbSet<StepState> Steps => Set<StepState>();
     public DbSet<AppMeta> Meta => Set<AppMeta>();
+    public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<SubscriptionMember> SubscriptionMembers => Set<SubscriptionMember>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<UsageCharge> UsageCharges => Set<UsageCharge>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
@@ -34,6 +40,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         builder.Properties<FeatureStatus>().HaveConversion<string>().HaveMaxLength(32);
         builder.Properties<TaskState>().HaveConversion<string>().HaveMaxLength(32);
         builder.Properties<TaskKind>().HaveConversion<string>().HaveMaxLength(32);
+        builder.Properties<SubscriptionStatus>().HaveConversion<string>().HaveMaxLength(32);
+        builder.Properties<PaymentStatus>().HaveConversion<string>().HaveMaxLength(32);
     }
 
     protected override void OnModelCreating(ModelBuilder model)
@@ -99,6 +107,47 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         });
 
         model.Entity<AppMeta>().HasKey(m => m.Key);
+
+        model.Entity<AppUser>(e =>
+        {
+            e.HasKey(u => u.Id);
+            e.Property(u => u.UserName).HasMaxLength(64);
+            e.Property(u => u.DisplayName).HasMaxLength(128);
+            e.Property(u => u.Email).HasMaxLength(256);
+            e.Property(u => u.Phone).HasMaxLength(20);
+            e.HasIndex(u => u.UserName).IsUnique();
+        });
+        model.Entity<Subscription>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.Property(s => s.Name).HasMaxLength(128);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(s => s.OwnerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(s => s.Members).WithOne().HasForeignKey(m => m.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<SubscriptionMember>(e =>
+        {
+            e.HasKey(m => m.UserId);
+            e.HasOne(m => m.User).WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<Payment>(e =>
+        {
+            e.HasKey(p => p.Id);
+            e.Property(p => p.CashfreeOrderId).HasMaxLength(64);
+            e.Property(p => p.Amount).HasPrecision(18, 2);
+            e.Property(p => p.CreatedByUserId).HasMaxLength(32);
+            e.HasIndex(p => p.CashfreeOrderId).IsUnique();
+            e.HasIndex(p => new { p.SubscriptionId, p.CreatedAt });
+            e.HasOne<Subscription>().WithMany().HasForeignKey(p => p.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<UsageCharge>(e =>
+        {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.UserId).HasMaxLength(32);
+            e.Property(c => c.UserName).HasMaxLength(128);
+            e.Property(c => c.Amount).HasPrecision(18, 2);
+            e.HasIndex(c => new { c.SubscriptionId, c.UserId, c.Date }).IsUnique();
+            e.HasOne<Subscription>().WithMany().HasForeignKey(c => c.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         // IDs are 32-character GUIDs: keys and foreign keys get a fixed length so they can be indexed.
         foreach (var property in model.Model.GetEntityTypes().SelectMany(t => t.GetProperties())

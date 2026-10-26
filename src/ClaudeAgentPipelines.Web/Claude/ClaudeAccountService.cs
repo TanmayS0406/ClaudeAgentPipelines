@@ -8,9 +8,6 @@ namespace ClaudeAgentPipelines.Claude;
 /// </summary>
 public sealed class ClaudeAccountService(ClaudeCli cli, ILogger<ClaudeAccountService> logger)
 {
-    /// <summary>Claim holding <see cref="ClaudeAuthStatus.Account"/> in the app's sign-in cookie.</summary>
-    public const string AccountClaim = "claude:account";
-
     private static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan StatusTimeout = TimeSpan.FromSeconds(30);
 

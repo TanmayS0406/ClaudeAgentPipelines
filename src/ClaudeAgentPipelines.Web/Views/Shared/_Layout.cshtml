@@ -1,3 +1,5 @@
+@inject ClaudeAgentPipelines.Claude.ClaudeAccountService Claude
+@using ClaudeAgentPipelines.Controllers
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -18,9 +20,12 @@
                 <a asp-controller="Pipelines" asp-action="Index">Pipelines</a>
                 <a asp-controller="Runs" asp-action="Index">Runs</a>
                 <a asp-controller="Azure" asp-action="Index">Azure</a>
+                <a asp-controller="Subscription" asp-action="Index">Subscription</a>
+                <a asp-controller="Billing" asp-action="Index">Billing</a>
+                <a asp-controller="Account" asp-action="Claude">Claude</a>
             </nav>
             <div class="account">
-                <span class="account-name" title="Signed in with Claude">@User.Identity.Name</span>
+                <span class="account-name" title="Signed in as @User.FindFirst(AccountController.UserNameClaim)?.Value">@User.Identity.Name</span>
                 <form asp-controller="Account" asp-action="Logout" method="post">
                     <button type="submit" class="btn btn-link">Sign out</button>
                 </form>
@@ -29,6 +34,14 @@
     </header>
 
     <main class="container@(ViewData["Wide"] as bool? == true ? " container-wide" : "")">
+        @if (User.Identity?.IsAuthenticated == true && ViewContext.RouteData.Values["action"] as string != "Claude"
+             && !(await Claude.GetStatusAsync()).LoggedIn)
+        {
+            <div class="alert alert-error">
+                Claude is not signed in on this computer, so pipelines cannot run.
+                <a asp-controller="Account" asp-action="Claude">Sign in with Claude</a>
+            </div>
+        }
         @if (TempData["Message"] is string message)
         {
             <div class="alert alert-ok">@message</div>

@@ -1,5 +1,5 @@
-// Sign in with Claude: opens `claude auth login` on this computer, then polls until Claude Code reports
-// a signed-in account and continues into the app.
+// Claude account page: opens `claude auth login` on this computer, then polls until Claude Code reports
+// a signed-in account and reloads the page to show it.
 (function () {
     const button = document.getElementById('start-login');
     if (!button) return;
@@ -7,8 +7,7 @@
     const progress = document.getElementById('login-progress');
     const progressText = document.getElementById('login-progress-text');
     const errorBox = document.getElementById('login-error');
-    const continueForm = document.getElementById('continue-form');
-    const token = continueForm.querySelector('input[name="__RequestVerificationToken"]').value;
+    const token = document.querySelector('#claude-form input[name="__RequestVerificationToken"]').value;
     let initialAccount = null;
     let polling = false;
 
@@ -34,13 +33,13 @@
 
             // A different account counts too ("Use a different Claude account").
             if (status.loggedIn && status.account !== initialAccount) {
-                progressText.textContent = 'Signed in as ' + status.account + '. Continuing...';
-                continueForm.submit();
+                progressText.textContent = 'Signed in as ' + status.account + '.';
+                location.reload();
                 return;
             }
             if (!status.loginInProgress) {
                 if (status.loggedIn) {
-                    continueForm.submit();
+                    location.reload();
                     return;
                 }
                 polling = false;

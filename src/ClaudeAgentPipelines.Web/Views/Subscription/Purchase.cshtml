@@ -1,0 +1,67 @@
+@model PurchaseViewModel
+@{
+    ViewData["Title"] = Model.IsNew ? "Buy subscription" : "Add money";
+    var perDay = Model.Users * Model.DailyRate;
+}
+
+<h1>@ViewData["Title"]</h1>
+
+@if (!Model.CashfreeConfigured)
+{
+    <div class="alert alert-error">
+        Cashfree is not set up yet, so payments cannot be taken. Set <code>Cashfree:ClientId</code> and
+        <code>Cashfree:ClientSecret</code> (see the README), then reload this page.
+    </div>
+}
+
+<div class="purchase-grid">
+    <form class="card form" asp-action="Purchase" method="post" id="purchase-form"
+          data-rate="@Model.DailyRate.ToString(System.Globalization.CultureInfo.InvariantCulture)" data-users="@Model.Users">
+        <h2>How many days?</h2>
+        <p class="muted">
+            Pay as you go: you add money for the days you want to use, and each day @Money.Format(Model.DailyRate) per user is taken from it.
+            Money that is not used stays on your balance.
+        </p>
+        <div asp-validation-summary="ModelOnly" class="alert alert-error"></div>
+
+        <label asp-for="Form.Days">Days of use</label>
+        <input asp-for="Form.Days" type="number" min="1" max="365" id="days" />
+        <div class="presets">
+            <button type="button" class="btn btn-secondary" data-days="7">7 days</button>
+            <button type="button" class="btn btn-secondary" data-days="30">30 days</button>
+            <button type="button" class="btn btn-secondary" data-days="90">90 days</button>
+        </div>
+        <span asp-validation-for="Form.Days" class="field-error"></span>
+
+        <label asp-for="Form.Phone">Mobile number <span class="muted">(Cashfree asks for it)</span></label>
+        <input asp-for="Form.Phone" inputmode="numeric" maxlength="10" autocomplete="tel-national" />
+        <span asp-validation-for="Form.Phone" class="field-error"></span>
+
+        <label asp-for="Form.Email">E-mail <span class="muted">(optional, for the receipt)</span></label>
+        <input asp-for="Form.Email" type="email" autocomplete="email" />
+        <span asp-validation-for="Form.Email" class="field-error"></span>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large" disabled="@(!Model.CashfreeConfigured)">
+                Pay <span id="total-button"></span> with Cashfree
+            </button>
+            <a class="btn btn-secondary" asp-action="Index">Cancel</a>
+        </div>
+    </form>
+
+    <aside class="card summary">
+        <h2>Order summary</h2>
+        <dl>
+            <dt>Users</dt><dd>@Model.Users</dd>
+            <dt>Price</dt><dd>@Money.Format(Model.DailyRate) per user per day</dd>
+            <dt>Cost per day</dt><dd>@Money.Format(perDay)</dd>
+            <dt>Days</dt><dd id="summary-days"></dd>
+            <dt class="total">Total</dt><dd class="total" id="total"></dd>
+        </dl>
+        <p class="muted">Adding users later raises the daily cost; the money you add covers fewer days then.</p>
+    </aside>
+</div>
+
+@section Scripts {
+    <script src="~/js/purchase.js" asp-append-version="true"></script>
+}

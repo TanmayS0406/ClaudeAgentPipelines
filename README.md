@@ -1,6 +1,6 @@
 # Claude Agent Pipelines
 
-An ASP.NET Core MVC app where you **sign in with your Claude account** and run **multi-agent pipelines** built on
+An ASP.NET Core MVC app where you sign in, pay as you go for a subscription, and run **multi-agent pipelines** on your Claude account, built on
 [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). Each agent has its own prompt, model and
 attached reference files.
 
@@ -55,10 +55,19 @@ With autopilot on, the board starts every planned feature whose dependencies are
 
 ## How it works
 
-- **Sign in with Claude.** It works the same way as the SSMS Claude Chat extension: the app never sees your Claude
-  password or tokens. Clicking **Sign in with Claude** opens `claude auth login` (the official Claude Code CLI) on this
-  computer, and you finish signing in in your browser. Once the CLI reports a signed-in account, the app gives you a
-  cookie session for that account. The session ends as soon as Claude Code is signed out or switches account.
+- **Sign in to the app.** User name and password, stored in the database (salted PBKDF2 hashes). The first start
+  creates the user **`test`** with password **`test`**. Change it, or add your own users, before sharing the app.
+- **Subscription (pay as you go).** After signing in you need an active subscription. It costs **₹200 per user per
+  day** (`Billing:DailyRatePerUser`) and is paid from a prepaid balance that you top up through **Cashfree** on the
+  **Subscription > Add money** page (choose the number of days; the total is days × users × ₹200). Once a day each user
+  on the subscription is charged from the balance; when the balance cannot cover the day the subscription is
+  suspended until money is added. Days run midnight to midnight, India time. **Billing** shows the balance, every
+  payment and the daily charges. The owner can **add users** (creates their account) and remove them; all users share
+  the one balance. A user added during the day is charged for that day straight away.
+- **Claude account.** It works the same way as the SSMS Claude Chat extension: the app never sees your Claude
+  password or tokens. The **Claude** page opens `claude auth login` (the official Claude Code CLI) on this
+  computer, and you finish signing in in your browser. Pipelines run on that account; a notice shows at the top while
+  Claude is not signed in.
 - **Pipelines** are a chain of agents. They run as an Agent Framework sequential workflow
   (`AgentWorkflowBuilder.BuildSequential`). Every agent receives the pipeline input plus the replies of all earlier
   agents, and the last agent's reply is the result.
@@ -84,7 +93,9 @@ cd src/ClaudeAgentPipelines.Web
 dotnet run
 ```
 
-Open http://localhost:5180 and click **Sign in with Claude**, then **New board** to start a feature board. The first start also creates a sample **Release notes**
+Open http://localhost:5180 and sign in as `test` / `test`. Add money to the subscription (see **Payments with Cashfree**
+below; or set `Billing:RequireSubscription` to `false` to skip payment while you try the app), open **Claude** and sign in
+with Claude, then click **New board** to start a feature board. The first start also creates a sample **Release notes**
 pipeline (analyst → writer → editor) with attached files, so you can run it right away.
 
 ## Configuration (`appsettings.json`)
@@ -105,6 +116,12 @@ pipeline (analyst → writer → editor) with attached files, so you can run it 
 | `Board:MaxTestRounds` | `2` | Test rounds before a feature fails (developers fix between rounds) |
 | `Board:MaxIntegrationTurns` | `6` | Messages Backend and Frontend may exchange while integrating |
 | `Board:MaxParallelFeaturesLimit` | `6` | Highest "features in parallel" a board can choose |
+| `Billing:DailyRatePerUser` | `200` | Rupees charged per user per day |
+| `Billing:RequireSubscription` | `true` | Users without an active subscription can only reach the Subscription, Billing and account pages |
+| `Billing:WorkerIntervalSeconds` | `60` | How often waiting payments are checked and the new day is charged |
+| `Cashfree:ClientId` / `ClientSecret` | *(empty)* | Your Cashfree app ID and secret key. Keep them in user secrets or environment variables, not in the file |
+| `Cashfree:Environment` | `Sandbox` | `Sandbox` for test payments, `Production` for real money |
+| `Cashfree:ReturnBaseUrl` | *(the address the app is opened on)* | Where Cashfree sends the customer back after paying. Production needs an `https` address |
 
 ## Database
 
@@ -121,6 +138,27 @@ dotnet ef migrations add <Name> --project src/ClaudeAgentPipelines.Web --output-
 
 If `App_Data` still holds the JSON files of an earlier version (`pipelines`, `projects`, `runs`), the first start copies
 them into the database once and leaves the files where they are.
+
+## Payments with Cashfree
+
+Money is added to the subscription with the [Cashfree Payment Gateway](https://www.cashfree.com/docs/payments/online):
+the app creates an order (API version `2023-08-01`), opens Cashfree's checkout, and when the customer comes back asks
+Cashfree whether the order was paid before crediting anything. A background job also checks orders that were left open
+(for example the browser was closed after paying), so no webhook or public address is needed.
+
+1. Create a Cashfree account and copy the **App ID** and **Secret Key** (Sandbox keys for testing) from the dashboard.
+2. Store them outside the repository, in the project folder:
+
+   ```
+   dotnet user-secrets set "Cashfree:ClientId" "<App ID>"
+   dotnet user-secrets set "Cashfree:ClientSecret" "<Secret Key>"
+   ```
+
+3. Start the app, open **Subscription > Add money** and pay with one of the test cards or UPI IDs listed in Cashfree's
+   [documentation](https://www.cashfree.com/docs/payments/online) (sandbox).
+
+For real money set `Cashfree:Environment` to `Production`, use the production keys and serve the app on an `https`
+address (set `Cashfree:ReturnBaseUrl`). Cashfree needs a 10-digit mobile number on every order; the Add money page asks for it.
 
 ## Security model
 
@@ -143,7 +181,9 @@ src/ClaudeAgentPipelines.Web/
                 slots, scheduling, merge lock), GitWorkspace (branches, worktrees, merges), BoardNotifier (live board)
   Data/         AppDbContext (schema), Migrations, DatabaseInitializer (applies migrations on start, one-time import of old JSON files)
   Pipelines/    models, PipelineStore (database), PipelineRunner (Agent Framework workflow), RunManager, PipelineRun
-  Controllers/  Account (sign in with Claude), Pipelines (agents, prompts, files), Runs (live view, SSE, cancel),
+  Billing/      users and subscriptions: UserService (login), BillingService (balance, daily charges, add/remove users),
+                CashfreeClient (orders API), BillingWorker (settles waiting payments, charges each new day)
+  Controllers/  Account (sign in, Claude account), Subscription (users, add money), Billing, Pipelines (agents, prompts, files), Runs (live view, SSE, cancel),
                 Boards (board, SSE, settings, team), Features (work items), Azure (sign in to Azure)
   Views/, wwwroot/
 ```

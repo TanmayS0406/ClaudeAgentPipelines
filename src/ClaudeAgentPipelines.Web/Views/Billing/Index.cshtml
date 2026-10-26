@@ -1,0 +1,77 @@
+@model BillingOverview
+@{
+    ViewData["Title"] = "Billing";
+    var summary = Model.Summary;
+}
+
+<div class="page-header">
+    <h1>Billing</h1>
+    @if (summary.IsOwner)
+    {
+        <a class="btn btn-primary" asp-controller="Subscription" asp-action="Purchase">Add money</a>
+    }
+</div>
+
+<div class="stats">
+    <div class="card stat"><span class="stat-label">Balance</span><span class="stat-value">@Money.Format(summary.Balance)</span><span class="muted">lasts @summary.DaysLeft day@(summary.DaysLeft == 1 ? "" : "s")</span></div>
+    <div class="card stat"><span class="stat-label">Added so far</span><span class="stat-value">@Money.Format(Model.TotalPaid)</span></div>
+    <div class="card stat"><span class="stat-label">Used so far</span><span class="stat-value">@Money.Format(Model.TotalSpent)</span></div>
+    <div class="card stat"><span class="stat-label">Cost per day</span><span class="stat-value">@Money.Format(summary.DailyCost)</span><span class="muted">@summary.Members.Count user@(summary.Members.Count == 1 ? "" : "s") x @Money.Format(summary.DailyRate)</span></div>
+</div>
+
+<h2>Daily charges</h2>
+@if (Model.Days.Count == 0)
+{
+    <p class="muted">Nothing has been charged yet. Charges start once the first payment is in.</p>
+}
+else
+{
+    <table class="card table">
+        <thead><tr><th>Day</th><th>Users</th><th class="right">Amount</th></tr></thead>
+        <tbody>
+            @foreach (var day in Model.Days)
+            {
+                <tr>
+                    <td>@IndiaTime.Format(day.Date)</td>
+                    <td>@day.Users.Count &middot; <span class="muted">@string.Join(", ", day.Users)</span></td>
+                    <td class="right">@Money.Format(day.Amount)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="muted">The last 60 days are shown. A day runs from midnight to midnight, India time.</p>
+}
+
+<h2>Payments</h2>
+@if (Model.Payments.Count == 0)
+{
+    <p class="muted">No payments yet.</p>
+}
+else
+{
+    <table class="card table">
+        <thead><tr><th>Date</th><th>Order</th><th>For</th><th>Status</th><th class="right">Amount</th></tr></thead>
+        <tbody>
+            @foreach (var payment in Model.Payments)
+            {
+                <tr>
+                    <td>@IndiaTime.Format(payment.CreatedAt)</td>
+                    <td><code>@payment.CashfreeOrderId</code></td>
+                    <td>@payment.Days day@(payment.Days == 1 ? "" : "s") &times; @payment.Users user@(payment.Users == 1 ? "" : "s")</td>
+                    <td>
+                        <span class="status @(payment.Status switch { PaymentStatus.Paid => "status-completed", PaymentStatus.Failed => "status-failed", _ => "status-running" })">@payment.Status</span>
+                        @if (payment.Status == PaymentStatus.Pending && summary.IsOwner)
+                        {
+                            <a asp-controller="Subscription" asp-action="Checkout" asp-route-id="@payment.Id">Pay now</a>
+                        }
+                        @if (payment.Detail is not null)
+                        {
+                            <div class="muted">@payment.Detail</div>
+                        }
+                    </td>
+                    <td class="right">@Money.Format(payment.Amount)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

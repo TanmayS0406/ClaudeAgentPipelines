@@ -86,3 +86,50 @@ public sealed class BoardOptions
         ? Path.GetFullPath(WorkspacesFolder)
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "ClaudeAgentBoards");
 }
+
+/// <summary>"Billing" section: the pay-as-you-go price and whether the app needs a subscription.</summary>
+public sealed class BillingOptions
+{
+    public const string Section = "Billing";
+
+    /// <summary>Charged every day for every user on a subscription, in rupees.</summary>
+    public decimal DailyRatePerUser { get; set; } = 200;
+
+    /// <summary>
+    /// On: users without an active subscription can only reach the subscription, billing and account pages.
+    /// Turn it off to use the app without paying (for example while Cashfree is not set up yet).
+    /// </summary>
+    public bool RequireSubscription { get; set; } = true;
+
+    /// <summary>How often payments waiting for Cashfree are checked and the daily charges are applied.</summary>
+    public int WorkerIntervalSeconds { get; set; } = 60;
+}
+
+/// <summary>"Cashfree" section: the payment gateway account. Keep the secret in user secrets or an environment variable.</summary>
+public sealed class CashfreeOptions
+{
+    public const string Section = "Cashfree";
+
+    public string ClientId { get; set; } = string.Empty;
+    public string ClientSecret { get; set; } = string.Empty;
+
+    /// <summary>"Sandbox" (test payments) or "Production".</summary>
+    public string Environment { get; set; } = "Sandbox";
+
+    public string ApiVersion { get; set; } = "2023-08-01";
+
+    /// <summary>
+    /// Where Cashfree sends the customer back to after paying. Empty = the address the app is opened on.
+    /// Production needs an https address.
+    /// </summary>
+    public string ReturnBaseUrl { get; set; } = string.Empty;
+
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
+
+    public bool IsProduction => string.Equals(Environment, "Production", StringComparison.OrdinalIgnoreCase);
+
+    public string ApiBase => IsProduction ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
+
+    /// <summary>The "mode" the Cashfree JS checkout is opened with.</summary>
+    public string CheckoutMode => IsProduction ? "production" : "sandbox";
+}

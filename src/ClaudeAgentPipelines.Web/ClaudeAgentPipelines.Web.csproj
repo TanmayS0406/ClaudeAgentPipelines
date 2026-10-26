@@ -1,10 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ClaudeAgentPipelines</RootNamespace>
+    <UserSecretsId>0508bb2b-3982-487a-a90c-ab8af48c2d5e</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

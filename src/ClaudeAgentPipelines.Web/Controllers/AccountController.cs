@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using ClaudeAgentPipelines.Billing;
 using ClaudeAgentPipelines.Claude;
 using ClaudeAgentPipelines.Models;
 using Microsoft.AspNetCore.Authentication;
@@ -9,66 +10,41 @@ using Microsoft.AspNetCore.Mvc;
 namespace ClaudeAgentPipelines.Controllers;
 
 /// <summary>
-/// "Sign in with Claude": the Claude Code CLI on this computer does the actual sign-in (browser OAuth with the user's
-/// Claude account). Once it reports a signed-in account, the app issues its own cookie for that account.
+/// Signing in to the app (user name and password, checked against the database) and connecting the Claude account the
+/// pipelines run on. For the Claude part the Claude Code CLI on this computer does the actual sign-in.
 /// </summary>
-[AllowAnonymous]
-public sealed class AccountController(ClaudeAccountService account) : Controller
+public sealed class AccountController(UserService users, ClaudeAccountService claudeAccount) : Controller
 {
-    [HttpGet]
-    public async Task<IActionResult> Login(string? returnUrl, CancellationToken cancellationToken)
-    {
-        var status = await account.GetStatusAsync(refresh: true, cancellationToken);
-        return View(new LoginViewModel(status, account.IsLoginInProgress, SafeReturnUrl(returnUrl)));
-    }
+    public const string UserNameClaim = "username";
 
-    /// <summary>Polled by the login page while the sign-in console is open.</summary>
-    [HttpGet]
-    public async Task<IActionResult> Status(CancellationToken cancellationToken)
-    {
-        var status = await account.GetStatusAsync(refresh: true, cancellationToken);
-        return Json(new
-        {
-            cliFound = status.CliFound,
-            loggedIn = status.LoggedIn,
-            account = status.Account,
-            loginInProgress = account.IsLoginInProgress
-        });
-    }
+    [AllowAnonymous, HttpGet]
+    public IActionResult Login(string? returnUrl) =>
+        User.Identity?.IsAuthenticated == true
+            ? LocalRedirect(SafeReturnUrl(returnUrl))
+            : View(new LoginForm { ReturnUrl = SafeReturnUrl(returnUrl) });
 
-    /// <summary>Opens <c>claude auth login</c> in a console window on this computer.</summary>
-    [HttpPost]
-    public IActionResult StartLogin()
+    [AllowAnonymous, HttpPost]
+    public async Task<IActionResult> Login(LoginForm form, CancellationToken cancellationToken)
     {
-        if (!account.StartLogin())
-        {
-            return BadRequest(new { error = "Claude Code CLI not found. Install it, or set Claude:CliPath in appsettings.json." });
-        }
-        return Json(new { started = true });
-    }
+        if (!ModelState.IsValid) return View(form);
 
-    /// <summary>Signs in to this app as the Claude account the CLI is signed in with.</summary>
-    [HttpPost]
-    public async Task<IActionResult> Continue(string? returnUrl, CancellationToken cancellationToken)
-    {
-        var status = await account.GetStatusAsync(refresh: true, cancellationToken);
-        if (!status.LoggedIn)
+        var user = await users.AuthenticateAsync(form.UserName, form.Password, cancellationToken);
+        if (user is null)
         {
-            TempData["Error"] = "Claude is not signed in yet. Click \"Sign in with Claude\" and finish the sign-in in your browser.";
-            return RedirectToAction(nameof(Login), new { returnUrl });
+            await Task.Delay(400, cancellationToken); // slows down guessing
+            form.Password = string.Empty;
+            ModelState.AddModelError(string.Empty, "Wrong user name or password.");
+            return View(form);
         }
 
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.Name, status.Email ?? status.AuthMethod ?? "Claude user"),
-            new(ClaudeAccountService.AccountClaim, status.Account!)
-        };
-        if (status.Email is not null) claims.Add(new Claim(ClaimTypes.Email, status.Email));
-        if (status.SubscriptionType is not null) claims.Add(new Claim("claude:subscription", status.SubscriptionType));
-
-        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var identity = new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, user.Id),
+            new Claim(ClaimTypes.Name, user.DisplayName),
+            new Claim(UserNameClaim, user.UserName)
+        ], CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
-        return LocalRedirect(SafeReturnUrl(returnUrl));
+        return LocalRedirect(SafeReturnUrl(form.ReturnUrl));
     }
 
     /// <summary>Signs out of this app. With <paramref name="claude"/>, also signs Claude Code on this computer out.</summary>
@@ -78,9 +54,42 @@ public sealed class AccountController(ClaudeAccountService account) : Controller
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         if (claude)
         {
-            await account.LogoutAsync(cancellationToken);
+            await claudeAccount.LogoutAsync(cancellationToken);
         }
         return RedirectToAction(nameof(Login));
+    }
+
+    /// <summary>The Claude account the pipelines run on (the one Claude Code is signed in with on this computer).</summary>
+    [HttpGet]
+    public async Task<IActionResult> Claude(CancellationToken cancellationToken)
+    {
+        var status = await claudeAccount.GetStatusAsync(refresh: true, cancellationToken);
+        return View(new ClaudeViewModel(status, claudeAccount.IsLoginInProgress));
+    }
+
+    /// <summary>Polled by the Claude page while the sign-in console is open.</summary>
+    [HttpGet]
+    public async Task<IActionResult> Status(CancellationToken cancellationToken)
+    {
+        var status = await claudeAccount.GetStatusAsync(refresh: true, cancellationToken);
+        return Json(new
+        {
+            cliFound = status.CliFound,
+            loggedIn = status.LoggedIn,
+            account = status.Account,
+            loginInProgress = claudeAccount.IsLoginInProgress
+        });
+    }
+
+    /// <summary>Opens <c>claude auth login</c> in a console window on this computer.</summary>
+    [HttpPost]
+    public IActionResult StartLogin()
+    {
+        if (!claudeAccount.StartLogin())
+        {
+            return BadRequest(new { error = "Claude Code CLI not found. Install it, or set Claude:CliPath in appsettings.json." });
+        }
+        return Json(new { started = true });
     }
 
     private string SafeReturnUrl(string? returnUrl) =>

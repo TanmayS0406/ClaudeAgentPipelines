@@ -1,0 +1,115 @@
+@model SubscriptionViewModel
+@{
+    ViewData["Title"] = "Subscription";
+    var summary = Model.Summary;
+}
+
+@if (summary is null)
+{
+    <div class="page-header"><h1>Subscription</h1></div>
+    <section class="card">
+        <h2>Pay as you go</h2>
+        <p>
+            A subscription costs <strong>@Money.Format(Model.DailyRate)</strong> per user per day, charged from a balance you add
+            with Cashfree. Everyone you add to the subscription shares the same balance. You only pay for the days you
+            have users - add money whenever the balance runs low.
+        </p>
+        <p>
+            <a class="btn btn-primary btn-large" asp-action="Purchase">Buy subscription</a>
+        </p>
+    </section>
+}
+else
+{
+    var subscription = summary.Subscription;
+    <div class="page-header">
+        <h1>
+            @subscription.Name
+            <span class="status @(subscription.Status switch { SubscriptionStatus.Active => "status-completed", SubscriptionStatus.Suspended => "status-failed", _ => "status-cancelled" })">@subscription.Status</span>
+        </h1>
+        @if (summary.IsOwner)
+        {
+            <a class="btn btn-primary" asp-action="Purchase">Add money</a>
+        }
+    </div>
+
+    @if (subscription.Status == SubscriptionStatus.Suspended)
+    {
+        <div class="alert alert-error">
+            The balance does not cover today's charge of @Money.Format(summary.DailyCost), so the subscription is suspended.
+            @if (summary.IsOwner) { <text>Add money to start it again.</text> } else { <text>Ask the owner to add money.</text> }
+        </div>
+    }
+
+    <div class="stats">
+        <div class="card stat"><span class="stat-label">Balance</span><span class="stat-value">@Money.Format(summary.Balance)</span></div>
+        <div class="card stat"><span class="stat-label">Users</span><span class="stat-value">@summary.Members.Count</span></div>
+        <div class="card stat"><span class="stat-label">Cost per day</span><span class="stat-value">@Money.Format(summary.DailyCost)</span><span class="muted">@Money.Format(summary.DailyRate) x @summary.Members.Count</span></div>
+        <div class="card stat"><span class="stat-label">Balance lasts</span><span class="stat-value">@summary.DaysLeft day@(summary.DaysLeft == 1 ? "" : "s")</span></div>
+    </div>
+
+    <h2>Users</h2>
+    <table class="card table">
+        <thead><tr><th>User name</th><th>Name</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var member in summary.Members)
+            {
+                var isOwner = member.UserId == subscription.OwnerId;
+                <tr>
+                    <td>@member.User?.UserName @if (isOwner) { <span class="badge">owner</span> }</td>
+                    <td>@member.User?.DisplayName</td>
+                    <td>@IndiaTime.Format(member.AddedAt)</td>
+                    <td class="right">
+                        @if (summary.IsOwner && !isOwner)
+                        {
+                            <form asp-action="RemoveUser" asp-route-id="@member.UserId" method="post"
+                                  onsubmit="return confirm('Remove @member.User?.UserName from the subscription? They are not charged from tomorrow.')">
+                                <button type="submit" class="btn btn-link btn-danger">Remove</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @if (summary.IsOwner)
+    {
+        <h2>Add a user</h2>
+        <form class="card form" asp-action="AddUser" method="post" autocomplete="off">
+            <p class="muted">
+                Creates a new account the person can sign in with. Each user is charged @Money.Format(summary.DailyRate) a day
+                from today, from the balance above.
+            </p>
+            <div asp-validation-summary="ModelOnly" class="alert alert-error"></div>
+
+            <div class="row row-even">
+                <div>
+                    <label asp-for="AddUser.UserName">User name</label>
+                    <input asp-for="AddUser.UserName" autocomplete="off" />
+                    <span asp-validation-for="AddUser.UserName" class="field-error"></span>
+                </div>
+                <div>
+                    <label asp-for="AddUser.Password">Password</label>
+                    <input asp-for="AddUser.Password" type="password" autocomplete="new-password" />
+                    <span asp-validation-for="AddUser.Password" class="field-error"></span>
+                </div>
+            </div>
+            <div class="row row-even">
+                <div>
+                    <label asp-for="AddUser.DisplayName">Name <span class="muted">(optional)</span></label>
+                    <input asp-for="AddUser.DisplayName" />
+                </div>
+                <div>
+                    <label asp-for="AddUser.Email">E-mail <span class="muted">(optional)</span></label>
+                    <input asp-for="AddUser.Email" type="email" />
+                    <span asp-validation-for="AddUser.Email" class="field-error"></span>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" disabled="@(subscription.Status != SubscriptionStatus.Active)">Add user</button>
+            </div>
+        </form>
+    }
+}
