@@ -66,56 +66,68 @@ public sealed class ClaudeCodeChatClient(ClaudeCli cli, ClaudeCodeChatClientOpti
 
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(options.Timeout);
-
-            Directory.CreateDirectory(options.WorkingDirectory);
-            using var process = new Process
+            for (var attempt = 1; ; attempt++)
             {
-                StartInfo = CliProcess.CreateStartInfo(cliPath, BuildArguments(systemPromptFile, model), options.WorkingDirectory)
-            };
-            process.Start();
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(options.Timeout);
 
-            var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
-            await using (var stdin = new StreamWriter(process.StandardInput.BaseStream, Utf8NoBom))
-            {
-                await stdin.WriteAsync(BuildPrompt(history));
-            }
-
-            var reader = new StreamJsonReader();
-            await using (timeout.Token.Register(() => CliProcess.KillTree(process)))
-            {
-                // Killing the process closes stdout, which ends this loop.
-                string? line;
-                while ((line = await process.StandardOutput.ReadLineAsync(CancellationToken.None)) is not null)
+                Directory.CreateDirectory(options.WorkingDirectory);
+                using var process = new Process
                 {
-                    foreach (var update in reader.Read(line))
-                    {
-                        yield return update;
-                    }
+                    StartInfo = CliProcess.CreateStartInfo(cliPath, BuildArguments(systemPromptFile, model), options.WorkingDirectory)
+                };
+                process.Start();
+
+                var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+                await using (var stdin = new StreamWriter(process.StandardInput.BaseStream, Utf8NoBom))
+                {
+                    await stdin.WriteAsync(BuildPrompt(history));
                 }
-                await process.WaitForExitAsync(CancellationToken.None);
-            }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            if (timeout.IsCancellationRequested)
-            {
-                throw new TimeoutException($"Claude did not finish within {options.Timeout.TotalMinutes:0} minutes.");
-            }
+                var reader = new StreamJsonReader();
+                var yielded = false;
+                await using (timeout.Token.Register(() => CliProcess.KillTree(process)))
+                {
+                    // Killing the process closes stdout, which ends this loop.
+                    string? line;
+                    while ((line = await process.StandardOutput.ReadLineAsync(CancellationToken.None)) is not null)
+                    {
+                        foreach (var update in reader.Read(line))
+                        {
+                            yielded = true;
+                            yield return update;
+                        }
+                    }
+                    await process.WaitForExitAsync(CancellationToken.None);
+                }
 
-            var stderr = (await stderrTask).Trim();
-            if (reader.Error is not null)
-            {
-                throw new InvalidOperationException(DescribeError(reader.Error));
-            }
-            if (!reader.GotResult && process.ExitCode != 0)
-            {
-                throw new InvalidOperationException(DescribeError(
-                    stderr.Length > 0 ? stderr : $"Claude Code exited with code {process.ExitCode}."));
-            }
-            if (reader.Usage is not null)
-            {
-                yield return new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(reader.Usage)]) { ModelId = reader.Model };
+                cancellationToken.ThrowIfCancellationRequested();
+                if (timeout.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"Claude did not finish within {options.Timeout.TotalMinutes:0} minutes.");
+                }
+
+                var stderr = (await stderrTask).Trim();
+                var error = reader.Error
+                            ?? (!reader.GotResult && process.ExitCode != 0
+                                ? stderr.Length > 0 ? stderr : $"Claude Code exited with code {process.ExitCode}."
+                                : null);
+                if (error is not null)
+                {
+                    // Agents running in parallel race to refresh the shared OAuth token; the losers fail before doing
+                    // anything. Nothing has been streamed yet, so it is safe to wait for the refresh and run again.
+                    if (!yielded && IsTokenRefreshConflict(error) && attempt <= RefreshRetryDelays.Length)
+                    {
+                        await Task.Delay(RefreshRetryDelays[attempt - 1] + TimeSpan.FromMilliseconds(Random.Shared.Next(1000)), cancellationToken);
+                        continue;
+                    }
+                    throw new InvalidOperationException(DescribeError(error));
+                }
+                if (reader.Usage is not null)
+                {
+                    yield return new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(reader.Usage)]) { ModelId = reader.Model };
+                }
+                yield break;
             }
         }
         finally
@@ -193,9 +205,21 @@ public sealed class ClaudeCodeChatClient(ClaudeCli cli, ClaudeCodeChatClientOpti
         return prompt.ToString();
     }
 
+    /// <summary>Waits before each retry after a token refresh conflict (about a minute in total).</summary>
+    private static readonly TimeSpan[] RefreshRetryDelays =
+        [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(16), TimeSpan.FromSeconds(30)];
+
+    /// <summary>True when the CLI failed only because another Claude Code process was refreshing the OAuth token.</summary>
+    private static bool IsTokenRefreshConflict(string error) =>
+        error.Contains("another Claude Code process", StringComparison.OrdinalIgnoreCase);
+
     private static string DescribeError(string error)
     {
         var lower = error.ToLowerInvariant();
+        if (IsTokenRefreshConflict(error))
+        {
+            return error; // transient: signing in again does not help
+        }
         if (lower.Contains("login") || lower.Contains("api key") || lower.Contains("authenticat") || lower.Contains("oauth"))
         {
             return error + " Sign in with Claude again.";
