@@ -1,22 +1,23 @@
-using System.Text.Json;
+using ClaudeAgentPipelines.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace ClaudeAgentPipelines.Pipelines;
 
 /// <summary>
-/// Stores pipelines as JSON files: {DataFolder}/pipelines/{pipelineId}/pipeline.json, with each agent's files in
-/// {DataFolder}/pipelines/{pipelineId}/agents/{agentId}/.
+/// Stores pipelines and their agents in the database. The files uploaded for an agent stay on disk, because the
+/// Claude CLI reads them by path: {DataFolder}/pipelines/{pipelineId}/agents/{agentId}/.
 /// </summary>
 public sealed class PipelineStore
 {
-    internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly IDbContextFactory<AppDbContext> _databases;
     private readonly string _root;
 
-    public PipelineStore(IOptions<StorageOptions> options, IWebHostEnvironment environment)
+    public PipelineStore(IOptions<StorageOptions> options, IWebHostEnvironment environment, IDbContextFactory<AppDbContext> databases)
     {
-        DataFolder = Path.GetFullPath(Path.Combine(environment.ContentRootPath, options.Value.DataFolder));
+        _databases = databases;
+        DataFolder = options.Value.ResolveDataFolder(environment.ContentRootPath);
         _root = Path.Combine(DataFolder, "pipelines");
         Directory.CreateDirectory(_root);
     }
@@ -25,23 +26,16 @@ public sealed class PipelineStore
 
     public async Task<IReadOnlyList<Pipeline>> ListAsync(CancellationToken cancellationToken = default)
     {
-        var pipelines = new List<Pipeline>();
-        foreach (var dir in Directory.EnumerateDirectories(_root))
-        {
-            var pipeline = await GetAsync(Path.GetFileName(dir), cancellationToken);
-            if (pipeline is not null) pipelines.Add(pipeline);
-        }
+        await using var db = await _databases.CreateDbContextAsync(cancellationToken);
+        var pipelines = await db.PipelinesWithAgents().ToListAsync(cancellationToken);
         return pipelines.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
     public async Task<Pipeline?> GetAsync(string? id, CancellationToken cancellationToken = default)
     {
         if (!Ids.IsValid(id)) return null;
-        var file = PipelineFile(id!);
-        if (!File.Exists(file)) return null;
-
-        await using var stream = File.OpenRead(file);
-        return await JsonSerializer.DeserializeAsync<Pipeline>(stream, Json, cancellationToken);
+        await using var db = await _databases.CreateDbContextAsync(cancellationToken);
+        return await db.PipelinesWithAgents().FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
     }
 
     public async Task CreateAsync(Pipeline pipeline, CancellationToken cancellationToken = default)
@@ -83,6 +77,9 @@ public sealed class PipelineStore
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
+            await using var db = await _databases.CreateDbContextAsync(cancellationToken);
+            await db.Pipelines.Where(p => p.Id == id).ExecuteDeleteAsync(cancellationToken);
+
             var folder = PipelineFolder(id);
             if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
         }
@@ -173,7 +170,10 @@ public sealed class PipelineStore
     /// <summary>Creates an example pipeline with agent files the first time the app runs.</summary>
     public async Task EnsureSamplePipelineAsync()
     {
-        if (Directory.EnumerateDirectories(_root).Any()) return;
+        await using (var db = await _databases.CreateDbContextAsync())
+        {
+            if (await db.Pipelines.AnyAsync()) return;
+        }
 
         var analyst = new AgentDefinition
         {
@@ -241,18 +241,16 @@ public sealed class PipelineStore
 
     private string PipelineFolder(string id) => Path.Combine(_root, id);
 
-    private string PipelineFile(string id) => Path.Combine(PipelineFolder(id), "pipeline.json");
-
+    /// <summary>Saves the pipeline as a whole: its rows are deleted (agents and files go with them) and inserted again.</summary>
     private async Task WriteAsync(Pipeline pipeline, CancellationToken cancellationToken)
     {
         pipeline.UpdatedAt = DateTimeOffset.UtcNow;
-        var file = PipelineFile(pipeline.Id);
-        var temp = file + ".tmp";
-        await using (var stream = File.Create(temp))
-        {
-            await JsonSerializer.SerializeAsync(stream, pipeline, Json, cancellationToken);
-        }
-        File.Move(temp, file, overwrite: true);
+        await using var db = await _databases.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Pipelines.Where(p => p.Id == pipeline.Id).ExecuteDeleteAsync(cancellationToken);
+        db.Stage(pipeline);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static string SafeFileName(string fileName)

@@ -67,7 +67,7 @@ With autopilot on, the board starts every planned feature whose dependencies are
 - **Agent files.** Files you attach to an agent are passed to the CLI with `--add-dir`, so only that agent can read them.
   Agents only get the read-only `Read`, `Glob` and `Grep` tools. They have no shell, no file edits and no MCP servers.
 - **Runs** stream live to the browser over server-sent events: text as it is written, files the agent reads,
-  token usage, and step status. You can cancel a run, and finished runs are kept under `App_Data/runs`.
+  token usage, and step status. You can cancel a run, and finished runs are kept in the SQL Server database.
 
 ## Requirements
 
@@ -94,7 +94,8 @@ pipeline (analyst → writer → editor) with attached files, so you can run it 
 | `Claude:CliPath` | *(search PATH)* | Full path to `claude.exe` / `claude.cmd` |
 | `Claude:DefaultModel` | *(CLI default)* | Model for agents that don't set one: `opus`, `sonnet`, `haiku`, `fable` or a model id |
 | `Claude:AgentTimeoutMinutes` | `15` | One agent step is stopped after this long |
-| `Storage:DataFolder` | `App_Data` | Pipelines, agent files and run history |
+| `ConnectionStrings:Default` | SQL Server Express on `localhost\SQLEXPRESS`, database `ClaudeAgentPipelines` | SQL Server database holding pipelines, boards, features and runs. Migrations run automatically on start and create the database if it is missing |
+| `Storage:DataFolder` | `App_Data` | The files uploaded for agents (and, on first start, the old JSON files to import) |
 | `Storage:MaxFileBytes` / `MaxFilesPerAgent` | 10 MB / 20 | Upload limits |
 | `Storage:AllowedFileExtensions` | text, code, PDF, images | Files the agent's Read tool can use |
 | `Security:AllowRemoteClients` | `false` | See below |
@@ -104,6 +105,22 @@ pipeline (analyst → writer → editor) with attached files, so you can run it 
 | `Board:MaxTestRounds` | `2` | Test rounds before a feature fails (developers fix between rounds) |
 | `Board:MaxIntegrationTurns` | `6` | Messages Backend and Frontend may exchange while integrating |
 | `Board:MaxParallelFeaturesLimit` | `6` | Highest "features in parallel" a board can choose |
+
+## Database
+
+The app needs a SQL Server it can reach with the connection string above (the default uses Windows authentication to a
+local SQL Server Express). Nothing has to be set up by hand: on every start the app applies any pending EF Core
+migrations (`Data/Migrations`) and creates the database if it does not exist. The login needs permission to create
+databases the first time.
+
+When you change the model in `Data/AppDbContext.cs` or the model classes, add a migration; the next start applies it:
+
+```
+dotnet ef migrations add <Name> --project src/ClaudeAgentPipelines.Web --output-dir Data/Migrations
+```
+
+If `App_Data` still holds the JSON files of an earlier version (`pipelines`, `projects`, `runs`), the first start copies
+them into the database once and leaves the files where they are.
 
 ## Security model
 
@@ -121,10 +138,11 @@ opens a console window on that computer. So this is a single-user app for your o
 src/ClaudeAgentPipelines.Web/
   Claude/       ClaudeCli (locate, auth status/login/logout), ClaudeAccountService, ClaudeCodeChatClient (IChatClient)
   Azure/        AzureCli (az account show/list, az login/logout), AzureAccountService
-  Board/        models, BoardStore (JSON files), Team (roles, prompts, permissions), BoardOrchestrator (backlog plan),
+  Board/        models, BoardStore (database), Team (roles, prompts, permissions), BoardOrchestrator (backlog plan),
                 FeatureOrchestrator (one feature's stages as Agent Framework workflows), FeatureManager (parallel
                 slots, scheduling, merge lock), GitWorkspace (branches, worktrees, merges), BoardNotifier (live board)
-  Pipelines/    models, PipelineStore (JSON files), PipelineRunner (Agent Framework workflow), RunManager, PipelineRun
+  Data/         AppDbContext (schema), Migrations, DatabaseInitializer (applies migrations on start, one-time import of old JSON files)
+  Pipelines/    models, PipelineStore (database), PipelineRunner (Agent Framework workflow), RunManager, PipelineRun
   Controllers/  Account (sign in with Claude), Pipelines (agents, prompts, files), Runs (live view, SSE, cancel),
                 Boards (board, SSE, settings, team), Features (work items), Azure (sign in to Azure)
   Views/, wwwroot/

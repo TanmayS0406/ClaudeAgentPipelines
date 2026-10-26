@@ -15,7 +15,7 @@ public sealed class ClaudeOptions
     public int AgentTimeoutMinutes { get; set; } = 15;
 }
 
-/// <summary>"Storage" section: where pipelines, agent files and runs are kept.</summary>
+/// <summary>"Storage" section: where the files uploaded for agents are kept (the data itself is in SQL Server, see ConnectionStrings:Default).</summary>
 public sealed class StorageOptions
 {
     public const string Section = "Storage";
@@ -25,6 +25,8 @@ public sealed class StorageOptions
 
     /// <summary>Relative paths are resolved against the application content root.</summary>
     public string DataFolder { get; set; } = "App_Data";
+
+    public string ResolveDataFolder(string contentRoot) => Path.GetFullPath(Path.Combine(contentRoot, DataFolder));
 
     public long MaxFileBytes { get; set; } = 10 * 1024 * 1024;
 

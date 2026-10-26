@@ -3,6 +3,7 @@ using ClaudeAgentPipelines;
 using ClaudeAgentPipelines.Azure;
 using ClaudeAgentPipelines.Board;
 using ClaudeAgentPipelines.Claude;
+using ClaudeAgentPipelines.Data;
 using ClaudeAgentPipelines.Pipelines;
 using ClaudeAgentPipelines.Security;
 using Microsoft.AspNetCore.Authentication;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +20,11 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(Stor
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.Section));
 builder.Services.Configure<AzureOptions>(builder.Configuration.GetSection(AzureOptions.Section));
 builder.Services.Configure<BoardOptions>(builder.Configuration.GetSection(BoardOptions.Section));
+
+var storage = builder.Configuration.GetSection(StorageOptions.Section).Get<StorageOptions>() ?? new StorageOptions();
+builder.Services.AddDbContextFactory<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("Default")
+        ?? throw new InvalidOperationException("ConnectionStrings:Default is not set in appsettings.json.")));
 
 builder.Services.AddSingleton<ClaudeCli>();
 builder.Services.AddSingleton<ClaudeAccountService>();
@@ -65,7 +72,6 @@ builder.Services.AddControllersWithViews(options =>
     options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute());
 });
 
-var storage = builder.Configuration.GetSection(StorageOptions.Section).Get<StorageOptions>() ?? new StorageOptions();
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = storage.MaxFileBytes * storage.MaxFilesPerAgent + 1024 * 1024;
@@ -94,6 +100,9 @@ app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Boards}/{action=Index}/{id?}");
 
+await DatabaseInitializer.InitializeAsync(
+    app.Services.GetRequiredService<IDbContextFactory<AppDbContext>>(), storage, app.Environment.ContentRootPath,
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Database"));
 await app.Services.GetRequiredService<PipelineStore>().EnsureSamplePipelineAsync();
 var featureManager = app.Services.GetRequiredService<FeatureManager>();
 await featureManager.RecoverAsync();

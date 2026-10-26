@@ -1,47 +1,28 @@
-using System.Text.Json;
+using ClaudeAgentPipelines.Data;
 using ClaudeAgentPipelines.Pipelines;
+using Microsoft.EntityFrameworkCore;
 
 namespace ClaudeAgentPipelines.Board;
 
-/// <summary>
-/// Stores boards as JSON files: {DataFolder}/projects/{projectId}/project.json, with each feature in
-/// {DataFolder}/projects/{projectId}/features/{featureId}.json.
-/// </summary>
-public sealed class BoardStore
+/// <summary>Stores boards (projects), their agent teams, features and tasks in the database.</summary>
+public sealed class BoardStore(IDbContextFactory<AppDbContext> databases)
 {
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private readonly string _root;
-
-    public BoardStore(PipelineStore pipelines)
-    {
-        _root = Path.Combine(pipelines.DataFolder, "projects");
-        Directory.CreateDirectory(_root);
-    }
 
     public async Task<IReadOnlyList<Project>> ListProjectsAsync(CancellationToken cancellationToken = default)
     {
-        var projects = new List<Project>();
-        foreach (var dir in Directory.EnumerateDirectories(_root))
-        {
-            var project = await GetProjectAsync(Path.GetFileName(dir), cancellationToken);
-            if (project is not null) projects.Add(project);
-        }
+        await using var db = await databases.CreateDbContextAsync(cancellationToken);
+        var projects = await db.ProjectsWithTeam().ToListAsync(cancellationToken);
+        foreach (var project in projects) WithDefaultAgents(project);
         return projects.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
     public async Task<Project?> GetProjectAsync(string? id, CancellationToken cancellationToken = default)
     {
         if (!Ids.IsValid(id)) return null;
-        var project = await ReadAsync<Project>(ProjectFile(id!), cancellationToken);
-        if (project is null) return null;
-
-        // Boards made before a role existed get its default agent, in team order.
-        var defaults = Team.CreateDefaultTeam();
-        if (defaults.Any(d => project.Team.All(a => a.Role != d.Role)))
-        {
-            project.Team = defaults.Select(d => project.Team.FirstOrDefault(a => a.Role == d.Role) ?? d).ToList();
-        }
-        return project;
+        await using var db = await databases.CreateDbContextAsync(cancellationToken);
+        var project = await db.ProjectsWithTeam().FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+        return project is null ? null : WithDefaultAgents(project);
     }
 
     public async Task CreateProjectAsync(Project project, CancellationToken cancellationToken = default)
@@ -49,9 +30,10 @@ public sealed class BoardStore
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            Directory.CreateDirectory(FeaturesFolder(project.Id));
             project.UpdatedAt = DateTimeOffset.UtcNow;
-            await WriteAsync(ProjectFile(project.Id), project, cancellationToken);
+            await using var db = await databases.CreateDbContextAsync(cancellationToken);
+            db.Stage(project);
+            await db.SaveChangesAsync(cancellationToken);
         }
         finally
         {
@@ -70,7 +52,8 @@ public sealed class BoardStore
 
             change(project);
             project.UpdatedAt = DateTimeOffset.UtcNow;
-            await WriteAsync(ProjectFile(id), project, cancellationToken);
+            await using var db = await databases.CreateDbContextAsync(cancellationToken);
+            await db.UpdateAsync(project, cancellationToken);
             return project;
         }
         finally
@@ -86,8 +69,8 @@ public sealed class BoardStore
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            var folder = Path.Combine(_root, id);
-            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+            await using var db = await databases.CreateDbContextAsync(cancellationToken);
+            await db.Projects.Where(p => p.Id == id).ExecuteDeleteAsync(cancellationToken);
         }
         finally
         {
@@ -97,27 +80,20 @@ public sealed class BoardStore
 
     public async Task<IReadOnlyList<Feature>> ListFeaturesAsync(string projectId, CancellationToken cancellationToken = default)
     {
-        if (!Ids.IsValid(projectId) || !Directory.Exists(FeaturesFolder(projectId))) return [];
-
-        var features = new List<Feature>();
-        foreach (var file in Directory.EnumerateFiles(FeaturesFolder(projectId), "*.json"))
-        {
-            try
-            {
-                if (await ReadAsync<Feature>(file, cancellationToken) is { } feature) features.Add(feature);
-            }
-            catch (JsonException)
-            {
-                // Skip a damaged file.
-            }
-        }
-        return features.OrderBy(f => f.Number).ToList();
+        if (!Ids.IsValid(projectId)) return [];
+        await using var db = await databases.CreateDbContextAsync(cancellationToken);
+        return await db.FeaturesWithTasks()
+            .Where(f => f.ProjectId == projectId)
+            .OrderBy(f => f.Number)
+            .ToListAsync(cancellationToken);
     }
 
-    public Task<Feature?> GetFeatureAsync(string? projectId, string? featureId, CancellationToken cancellationToken = default) =>
-        Ids.IsValid(projectId) && Ids.IsValid(featureId)
-            ? ReadAsync<Feature>(FeatureFile(projectId!, featureId!), cancellationToken)
-            : Task.FromResult<Feature?>(null);
+    public async Task<Feature?> GetFeatureAsync(string? projectId, string? featureId, CancellationToken cancellationToken = default)
+    {
+        if (!Ids.IsValid(projectId) || !Ids.IsValid(featureId)) return null;
+        await using var db = await databases.CreateDbContextAsync(cancellationToken);
+        return await db.FeaturesWithTasks().FirstOrDefaultAsync(f => f.ProjectId == projectId && f.Id == featureId, cancellationToken);
+    }
 
     /// <summary>Gives the feature the project's next number and saves it.</summary>
     public async Task<Feature?> CreateFeatureAsync(string projectId, Feature feature, CancellationToken cancellationToken = default)
@@ -131,11 +107,12 @@ public sealed class BoardStore
             feature.ProjectId = project.Id;
             feature.Number = project.NextNumber++;
             project.UpdatedAt = DateTimeOffset.UtcNow;
-            await WriteAsync(ProjectFile(project.Id), project, cancellationToken);
-
-            Directory.CreateDirectory(FeaturesFolder(project.Id));
             feature.UpdatedAt = DateTimeOffset.UtcNow;
-            await WriteAsync(FeatureFile(project.Id, feature.Id), feature, cancellationToken);
+
+            await using var db = await databases.CreateDbContextAsync(cancellationToken);
+            await db.UpdateAsync(project, cancellationToken);
+            db.Stage(feature);
+            await db.SaveChangesAsync(cancellationToken);
             return feature;
         }
         finally
@@ -156,7 +133,14 @@ public sealed class BoardStore
 
             change(feature);
             feature.UpdatedAt = DateTimeOffset.UtcNow;
-            await WriteAsync(FeatureFile(projectId, featureId), feature, cancellationToken);
+
+            // Saved as a whole: the feature's rows (its tasks go with them) are deleted and inserted again.
+            await using var db = await databases.CreateDbContextAsync(cancellationToken);
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await db.Features.Where(f => f.Id == featureId).ExecuteDeleteAsync(cancellationToken);
+            db.Stage(feature);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return feature;
         }
         finally
@@ -171,8 +155,8 @@ public sealed class BoardStore
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            var file = FeatureFile(projectId, featureId);
-            if (File.Exists(file)) File.Delete(file);
+            await using var db = await databases.CreateDbContextAsync(cancellationToken);
+            await db.Features.Where(f => f.ProjectId == projectId && f.Id == featureId).ExecuteDeleteAsync(cancellationToken);
         }
         finally
         {
@@ -180,26 +164,14 @@ public sealed class BoardStore
         }
     }
 
-    private string ProjectFile(string id) => Path.Combine(_root, id, "project.json");
-
-    private string FeaturesFolder(string projectId) => Path.Combine(_root, projectId, "features");
-
-    private string FeatureFile(string projectId, string featureId) => Path.Combine(FeaturesFolder(projectId), featureId + ".json");
-
-    private static async Task<T?> ReadAsync<T>(string file, CancellationToken cancellationToken) where T : class
+    /// <summary>Boards made before a role existed get its default agent, in team order.</summary>
+    private static Project WithDefaultAgents(Project project)
     {
-        if (!File.Exists(file)) return null;
-        await using var stream = File.OpenRead(file);
-        return await JsonSerializer.DeserializeAsync<T>(stream, PipelineStore.Json, cancellationToken);
-    }
-
-    private static async Task WriteAsync<T>(string file, T value, CancellationToken cancellationToken)
-    {
-        var temp = file + ".tmp";
-        await using (var stream = File.Create(temp))
+        var defaults = Team.CreateDefaultTeam();
+        if (defaults.Any(d => project.Team.All(a => a.Role != d.Role)))
         {
-            await JsonSerializer.SerializeAsync(stream, value, PipelineStore.Json, cancellationToken);
+            project.Team = defaults.Select(d => project.Team.FirstOrDefault(a => a.Role == d.Role) ?? d).ToList();
         }
-        File.Move(temp, file, overwrite: true);
+        return project;
     }
 }

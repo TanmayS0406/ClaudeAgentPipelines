@@ -85,7 +85,7 @@
     }
 </div>
 
-<script type="application/json" id="board-data">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(new { cards = Model.Cards, orchestration = OrchestrationCard.From(project) }, PipelineStore.Json).Replace("<", "\\u003c"))</script>
+<script type="application/json" id="board-data">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(new { cards = Model.Cards, orchestration = OrchestrationCard.From(project) }, ClaudeAgentPipelines.Models.WebJson.Options).Replace("<", "\\u003c"))</script>
 <form id="board-token">@Html.AntiForgeryToken()</form>
 
 <dialog id="new-feature" class="dialog">
