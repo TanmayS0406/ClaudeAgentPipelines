@@ -37,11 +37,8 @@ public sealed class SubscriptionController(BillingService billing, UserService u
         try
         {
             var user = (await users.GetAsync(UserId, cancellationToken))!;
-            var baseUrl = string.IsNullOrWhiteSpace(cashfree.CurrentValue.ReturnBaseUrl)
-                ? $"{Request.Scheme}://{Request.Host}"
-                : cashfree.CurrentValue.ReturnBaseUrl.TrimEnd('/');
             var payment = await billing.StartPurchaseAsync(user, form.Days, form.Phone, form.Email,
-                baseUrl + "/Subscription/Return?order_id={order_id}", cancellationToken);
+                ReturnAddress.For(cashfree.CurrentValue.ReturnBaseUrl, Request.Scheme, Request.Host), cancellationToken);
             return RedirectToAction(nameof(Checkout), new { id = payment.Id });
         }
         catch (Exception ex) when (ex is BillingException or CashfreeException)
@@ -62,7 +59,35 @@ public sealed class SubscriptionController(BillingService billing, UserService u
         return View(new CheckoutViewModel(payment, cashfree.CurrentValue.CheckoutMode));
     }
 
-    /// <summary>Cashfree sends the customer back here. The payment is confirmed with Cashfree, never trusted from the address.</summary>
+    /// <summary>
+    /// Polled by the checkout page while the customer pays, possibly on their phone. Asks Cashfree about a pending
+    /// payment, so the page can carry on as soon as it is paid.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> CheckPayment(string id, CancellationToken cancellationToken)
+    {
+        var payment = await billing.GetPaymentAsync(UserId, id, cancellationToken);
+        if (payment is null) return NotFound();
+
+        string? problem = null;
+        if (payment.Status == PaymentStatus.Pending)
+        {
+            try
+            {
+                payment = await billing.SettleAsync(payment.CashfreeOrderId, cancellationToken) ?? payment;
+            }
+            catch (Exception ex) when (ex is BillingException or CashfreeException)
+            {
+                problem = ex.Message; // keep waiting; the next poll tries again
+            }
+        }
+        return Json(new { status = payment.Status.ToString(), detail = payment.Detail, problem });
+    }
+
+    /// <summary>
+    /// Where Cashfree sends the customer back to, when it is given an address (see <see cref="ReturnAddress"/>). The payment
+    /// is confirmed with Cashfree, never trusted from the address.
+    /// </summary>
     [HttpGet]
     public async Task<IActionResult> Return([FromQuery(Name = "order_id")] string? orderId, CancellationToken cancellationToken)
     {

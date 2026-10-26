@@ -11,17 +11,21 @@
         at @Money.Format(payment.Amount / payment.Days / payment.Users) per user per day.
     </p>
 
-    <p id="checkout-progress" class="login-progress"><span class="spinner"></span> Opening Cashfree...</p>
+    <p id="checkout-progress" class="login-progress"><span class="spinner"></span> <span id="checkout-status">Opening Cashfree...</span></p>
     <div id="checkout"
          data-session="@payment.PaymentSessionId"
          data-mode="@Model.Mode"
-         data-return-url="@Url.Action("Return", new { order_id = payment.CashfreeOrderId })"></div>
+         data-status-url="@Url.Action("CheckPayment", new { id = payment.Id })"
+         data-done-url="@Url.Action("Return", new { order_id = payment.CashfreeOrderId })"></div>
 
     <div class="login-actions">
-        <button type="button" id="open-checkout" class="btn btn-primary btn-large">Open payment page</button>
+        <button type="button" id="open-checkout" class="btn btn-primary btn-large">Open payment window</button>
         <a class="btn btn-secondary" asp-action="Return" asp-route-order_id="@payment.CashfreeOrderId">I have paid - check now</a>
     </div>
-    <p class="muted">Did the page not open? Allow pop-ups for this site, or click the button above.</p>
+    <p class="muted">
+        You can pay here or on your phone (for example by scanning the UPI QR code). Keep this page open: it moves on
+        by itself as soon as Cashfree confirms the payment.
+    </p>
 </section>
 
 @section Scripts {

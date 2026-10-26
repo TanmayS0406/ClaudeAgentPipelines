@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
@@ -16,7 +17,7 @@ public sealed record CashfreeOrderRequest(
     string CustomerName,
     string CustomerPhone,
     string? CustomerEmail,
-    string ReturnUrl,
+    string? ReturnUrl,
     string Note,
     DateTimeOffset ExpiresAt);
 
@@ -30,6 +31,10 @@ public sealed record CashfreeOrder(string OrderId, string Status, decimal Amount
 public sealed class CashfreeClient(IHttpClientFactory httpClients, IOptionsMonitor<CashfreeOptions> options)
 {
     public const string HttpClientName = "cashfree";
+
+    // The default writer turns "+", "<" and non-ASCII characters into \uXXXX escapes. They are valid JSON, but values
+    // such as times and e-mail addresses should reach Cashfree exactly as written.
+    private static readonly JsonSerializerOptions RequestJson = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     public bool IsConfigured => options.CurrentValue.IsConfigured;
 
@@ -49,13 +54,17 @@ public sealed class CashfreeClient(IHttpClientFactory httpClients, IOptionsMonit
             ["order_amount"] = order.Amount,
             ["order_currency"] = "INR",
             ["order_note"] = order.Note,
-            ["order_expiry_time"] = order.ExpiresAt.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
-            ["customer_details"] = customer,
-            ["order_meta"] = new JsonObject { ["return_url"] = order.ReturnUrl }
+            // ISO 8601 in UTC, like 2021-07-02T10:20:12Z (Cashfree also takes +05:30 style offsets).
+            ["order_expiry_time"] = order.ExpiresAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+            ["customer_details"] = customer
         };
 
+        // Without a return_url Cashfree shows its own "payment successful / failed" page when the customer is done.
+        // That is what a phone should see: a return address on this computer (localhost) means nothing on a phone.
+        if (!string.IsNullOrWhiteSpace(order.ReturnUrl)) body["order_meta"] = new JsonObject { ["return_url"] = order.ReturnUrl };
+
         using var request = CreateRequest(HttpMethod.Post, "/orders");
-        request.Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json");
+        request.Content = new StringContent(body.ToJsonString(RequestJson), System.Text.Encoding.UTF8, "application/json");
         return await SendAsync(request, cancellationToken);
     }
 

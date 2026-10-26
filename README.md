@@ -121,7 +121,7 @@ pipeline (analyst → writer → editor) with attached files, so you can run it 
 | `Billing:WorkerIntervalSeconds` | `60` | How often waiting payments are checked and the new day is charged |
 | `Cashfree:ClientId` / `ClientSecret` | *(empty)* | Your Cashfree app ID and secret key. Keep them in user secrets or environment variables, not in the file |
 | `Cashfree:Environment` | `Sandbox` | `Sandbox` for test payments, `Production` for real money |
-| `Cashfree:ReturnBaseUrl` | *(the address the app is opened on)* | Where Cashfree sends the customer back after paying. Production needs an `https` address |
+| `Cashfree:ReturnBaseUrl` | *(empty)* | Public address Cashfree sends the customer back to after paying (production needs `https`). Empty on localhost: no return address is sent, so a phone that paid sees Cashfree's own "payment successful" page instead of a broken `localhost` page |
 
 ## Database
 
@@ -143,8 +143,10 @@ them into the database once and leaves the files where they are.
 
 Money is added to the subscription with the [Cashfree Payment Gateway](https://www.cashfree.com/docs/payments/online):
 the app creates an order (API version `2023-08-01`), opens Cashfree's checkout, and when the customer comes back asks
-Cashfree whether the order was paid before crediting anything. A background job also checks orders that were left open
-(for example the browser was closed after paying), so no webhook or public address is needed.
+Cashfree whether the order was paid before crediting anything. The checkout opens as a pop-up on the app's page, which
+keeps asking until the order is settled, so you can pay on a phone (for example by scanning the UPI QR code) and the
+page moves on by itself. A background job also checks orders that were left open (for example the browser was closed
+after paying), so no webhook or public address is needed.
 
 1. Create a Cashfree account and copy the **App ID** and **Secret Key** (Sandbox keys for testing) from the dashboard.
 2. Store them outside the repository, in the project folder:

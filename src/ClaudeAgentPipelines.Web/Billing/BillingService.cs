@@ -130,7 +130,7 @@ public sealed partial class BillingService(
     /// Starts a payment that adds <paramref name="days"/> of use for the current number of users. Creates the
     /// subscription (owned by <paramref name="user"/>) on the first purchase. Returns the pending payment to open in the checkout.
     /// </summary>
-    public async Task<Payment> StartPurchaseAsync(AppUser user, int days, string? phone, string? email, string returnUrl,
+    public async Task<Payment> StartPurchaseAsync(AppUser user, int days, string? phone, string? email, string? returnUrl,
                                                   CancellationToken cancellationToken = default)
     {
         if (days is < 1 or > MaxDays) throw new BillingException($"Choose between 1 and {MaxDays} days.");
@@ -156,7 +156,7 @@ public sealed partial class BillingService(
             var orderId = "cap_" + Pipelines.Ids.New();
             var order = await cashfree.CreateOrderAsync(new CashfreeOrderRequest(
                 orderId, amount, user.Id, user.DisplayName, phone, email, returnUrl,
-                $"{days} day(s) for {members} user(s)", DateTimeOffset.UtcNow.AddHours(1).ToOffset(India)), cancellationToken);
+                $"{days} day(s) for {members} user(s)", DateTimeOffset.UtcNow.AddHours(1)), cancellationToken);
             if (string.IsNullOrEmpty(order.PaymentSessionId)) throw new CashfreeException("Cashfree did not return a payment session.");
 
             if (isNew)
