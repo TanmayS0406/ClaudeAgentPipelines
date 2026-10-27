@@ -76,8 +76,21 @@ public sealed class AzureAccountService(AzureCli cli, ILogger<AzureAccountServic
         }
     }
 
-    /// <summary>Opens the Azure sign-in console on this computer. Returns false when the CLI is not installed.</summary>
-    public bool StartLogin()
+    /// <summary>Makes a subscription the Azure CLI's default. Affects every tool that uses the CLI on this computer.</summary>
+    public async Task<(bool Ok, string? Error)> SetDefaultSubscriptionAsync(string subscriptionId, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(StatusTimeout);
+        var result = await cli.SetDefaultSubscriptionAsync(subscriptionId, timeout.Token);
+        _cached = null;
+        return result;
+    }
+
+    /// <summary>
+    /// Opens the Azure sign-in console on this computer, optionally for one tenant (directory). Returns false when the
+    /// CLI is not installed.
+    /// </summary>
+    public bool StartLogin(string? tenant = null)
     {
         if (IsLoginInProgress) return true;
 
@@ -86,7 +99,7 @@ public sealed class AzureAccountService(AzureCli cli, ILogger<AzureAccountServic
 
         logger.LogInformation("Starting 'az login' with {CliPath}", cliPath);
         _loginConsole?.Dispose();
-        _loginConsole = cli.StartLogin(cliPath);
+        _loginConsole = cli.StartLogin(cliPath, tenant);
         _cached = null;
         return true;
     }

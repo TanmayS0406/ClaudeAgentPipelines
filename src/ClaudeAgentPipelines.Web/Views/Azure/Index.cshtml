@@ -29,6 +29,33 @@
     </div>
 </section>
 
+<section class="card" data-role="subscriptions" hidden
+         data-subscriptions-url="@Url.Action("Subscriptions")" data-set-url="@Url.Action("SetSubscription")">
+    <h2>Subscriptions</h2>
+    <p class="muted">
+        Every subscription this Azure account can see. The <strong>default</strong> one is what the Azure CLI uses when a command
+        names no subscription - choosing another switches it for every tool that uses the CLI on this computer. Each board
+        picks the subscription it deploys to in its own settings; only <em>Enabled</em> subscriptions can be used.
+    </p>
+    <table class="table">
+        <thead><tr><th>Name</th><th>Subscription ID</th><th>Tenant</th><th>State</th><th></th></tr></thead>
+        <tbody data-role="subscription-rows"><tr><td colspan="5" class="muted">Loading the subscriptions...</td></tr></tbody>
+    </table>
+    <p class="alert alert-error" data-role="subscription-error" hidden></p>
+
+    <details class="tenant-signin">
+        <summary>A subscription is missing?</summary>
+        <p class="muted">
+            Subscriptions in another directory (tenant) only appear after you sign in to that tenant. Enter its tenant ID or
+            domain name; an Azure sign-in window opens on this computer, and the list updates when you are done.
+        </p>
+        <div class="tenant-row">
+            <input data-role="tenant" placeholder="Tenant ID or contoso.onmicrosoft.com" maxlength="100" autocomplete="off" />
+            <button type="button" class="btn btn-secondary" data-role="tenant-login">Sign in to this tenant</button>
+        </div>
+    </details>
+</section>
+
 @section Scripts {
     <script src="~/js/azure.js" asp-append-version="true"></script>
 }

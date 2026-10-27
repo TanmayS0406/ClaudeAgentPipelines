@@ -48,8 +48,10 @@ With autopilot on, the board starts every planned feature whose dependencies are
   dependencies, branch, and fix, retest and merge steps.
 - **Team.** Each board's Settings page has the eight agents' names, models and prompts, which you can change per board.
 - **Sign in to Azure.** Like Claude: **Azure > Sign in to Azure** opens `az login` (the official Azure CLI) on this
-  computer and the app never sees credentials. Choose the subscription, resource group and location in the board
-  settings. Deployment is **off** by default; when you turn it on the DevOps agent runs `infra/deploy.ps1`, which
+  computer and the app never sees credentials. The Azure page lists **every subscription** the signed-in account can
+  see (with its state and tenant) and lets you make one the Azure CLI's default; subscriptions in another tenant show up
+  after you sign in to that tenant from the same page. Choose the subscription, resource group and location in the
+  board settings (only Enabled subscriptions can be chosen). Deployment is **off** by default; when you turn it on the DevOps agent runs `infra/deploy.ps1`, which
   creates resources that cost money in that subscription. Note that `dotnet`, `npm` and the deploy script can run any
   code, so the folder rules guard against mistakes, not against a hostile agent: use boards on code you trust.
 

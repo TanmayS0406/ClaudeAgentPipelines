@@ -15,7 +15,11 @@ public sealed record AzureAuthStatus(
     string? TenantId = null,
     string? Detail = null);
 
-public sealed record AzureSubscription(string Id, string Name, string TenantId, bool IsDefault);
+/// <summary>A subscription the signed-in account can see. Only <c>Enabled</c> ones can be deployed to.</summary>
+public sealed record AzureSubscription(string Id, string Name, string TenantId, bool IsDefault, string State)
+{
+    public bool IsEnabled => State == "Enabled";
+}
 
 /// <summary>
 /// Thin wrapper around the Azure CLI. Like Claude, the app never handles Azure credentials: <c>az login</c> signs in
@@ -72,27 +76,32 @@ public sealed class AzureCli(IOptionsMonitor<AzureOptions> options)
         }
     }
 
-    /// <summary>Enabled subscriptions of the signed-in account. Empty when not signed in.</summary>
+    /// <summary>
+    /// Every subscription the Azure CLI knows for the signed-in account, in any state (<c>az account list --all</c>, the
+    /// CLI's own list, which is quick). Subscriptions in a directory (tenant) the CLI has no sign-in for are not in it:
+    /// sign in to that tenant first. Empty when not signed in.
+    /// </summary>
     public async Task<IReadOnlyList<AzureSubscription>> ListSubscriptionsAsync(CancellationToken cancellationToken)
     {
         var cliPath = Locate();
         if (cliPath is null) return [];
 
-        var result = await RunAsync(cliPath, ["account", "list", "--output", "json", "--only-show-errors"], cancellationToken);
+        var result = await RunAsync(cliPath, ["account", "list", "--all", "--output", "json", "--only-show-errors"], cancellationToken);
         if (result.ExitCode != 0) return [];
 
         try
         {
             return (JsonNode.Parse(result.Output) as JsonArray ?? [])
                 .OfType<JsonObject>()
-                .Where(s => (string?)s["state"] is null or "Enabled")
                 .Select(s => new AzureSubscription(
                     (string?)s["id"] ?? string.Empty,
                     (string?)s["name"] ?? string.Empty,
                     (string?)s["tenantId"] ?? string.Empty,
-                    (bool?)s["isDefault"] == true))
+                    (bool?)s["isDefault"] == true,
+                    (string?)s["state"] ?? "Enabled"))
                 .Where(s => s.Id.Length > 0)
-                .OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+                .OrderByDescending(s => s.IsEnabled)
+                .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
         }
         catch (JsonException)
@@ -101,8 +110,33 @@ public sealed class AzureCli(IOptionsMonitor<AzureOptions> options)
         }
     }
 
-    /// <summary>Opens a console window running <c>az login</c> (browser or Windows account sign-in).</summary>
-    public Process? StartLogin(string cliPath) => CliProcess.StartConsole(cliPath, "login");
+    /// <summary>
+    /// Makes a subscription the CLI's default (<c>az account set</c>). The id must be a GUID, which keeps it safe to pass on.
+    /// </summary>
+    public async Task<(bool Ok, string? Error)> SetDefaultSubscriptionAsync(string subscriptionId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(subscriptionId, out var id)) return (false, "That is not a subscription ID.");
+        var cliPath = Locate();
+        if (cliPath is null) return (false, "Azure CLI not found.");
+
+        var result = await RunAsync(cliPath, ["account", "set", "--subscription", id.ToString(), "--only-show-errors"], cancellationToken);
+        if (result.ExitCode == 0) return (true, null);
+
+        var message = result.Error.ReplaceLineEndings(" ").Trim();
+        if (message.Length > 300) message = message[..300] + "...";
+        return (false, message.Length > 0 ? message : "The Azure CLI could not switch to that subscription.");
+    }
+
+    /// <summary>True for a tenant ID (GUID) or a domain name like contoso.onmicrosoft.com: nothing a command line could misread.</summary>
+    public static bool IsValidTenant(string? tenant) =>
+        tenant is { Length: >= 3 and <= 100 } && char.IsAsciiLetterOrDigit(tenant[0]) && tenant.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-');
+
+    /// <summary>
+    /// Opens a console window running <c>az login</c> (browser or Windows account sign-in). With a tenant it signs in to
+    /// that directory, which is how its subscriptions show up.
+    /// </summary>
+    public Process? StartLogin(string cliPath, string? tenant = null) =>
+        CliProcess.StartConsole(cliPath, string.IsNullOrWhiteSpace(tenant) ? "login" : "login --tenant " + tenant.Trim());
 
     public async Task LogoutAsync(CancellationToken cancellationToken)
     {

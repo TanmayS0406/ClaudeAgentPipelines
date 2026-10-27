@@ -28,14 +28,29 @@ public sealed class AzureController(AzureAccountService azure) : Controller
         });
     }
 
+    /// <summary>All subscriptions the signed-in account can see, each with its state (only Enabled ones can be used).</summary>
     [HttpGet]
     public async Task<IActionResult> Subscriptions(CancellationToken cancellationToken) =>
-        Json(await azure.ListSubscriptionsAsync(cancellationToken));
+        Json((await azure.ListSubscriptionsAsync(cancellationToken))
+            .Select(s => new { s.Id, s.Name, s.TenantId, s.IsDefault, s.State, isEnabled = s.IsEnabled }));
 
+    /// <summary>Makes a subscription the Azure CLI's default.</summary>
     [HttpPost]
-    public IActionResult StartLogin()
+    public async Task<IActionResult> SetSubscription(string id, CancellationToken cancellationToken)
     {
-        if (!azure.StartLogin())
+        var (ok, error) = await azure.SetDefaultSubscriptionAsync(id, cancellationToken);
+        return ok ? Json(new { ok = true }) : BadRequest(new { error });
+    }
+
+    /// <summary>Opens <c>az login</c>; with a tenant, for that directory (to see the subscriptions in it).</summary>
+    [HttpPost]
+    public IActionResult StartLogin(string? tenant)
+    {
+        if (!string.IsNullOrWhiteSpace(tenant) && !AzureCli.IsValidTenant(tenant.Trim()))
+        {
+            return BadRequest(new { error = "Enter a tenant ID (a GUID) or a domain name such as contoso.onmicrosoft.com." });
+        }
+        if (!azure.StartLogin(string.IsNullOrWhiteSpace(tenant) ? null : tenant.Trim()))
         {
             return BadRequest(new { error = "Azure CLI not found. Install it (https://aka.ms/installazurecliwindows), or set Azure:CliPath in appsettings.json." });
         }
